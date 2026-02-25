@@ -1,0 +1,28 @@
+# fast_test — quick 1-year run for iteration and debugging
+#
+# Changes from default:
+#   - 1-year horizon instead of 3
+#   - 5 employees, 100 market tasks (faster seeding)
+#   - auto-advance after 5 idle turns instead of 10
+#   - 50-turn hard cap (prevents runaway debug runs)
+
+extends = "default"
+
+name        = "fast_test"
+description = "1-year horizon with minimal world for fast iteration."
+
+[sim]
+horizon_years = 1
+
+[loop]
+auto_advance_after_turns = 5
+max_turns                = 50
+
+[world]
+num_employees    = 5
+num_market_tasks = 100
+
+# With 5 employees (~220 units/day team throughput), the hardened default of
+# 320 is physically impossible for most tasks. 200 restores parity so a
+# focused agent can actually win tasks on time.
+deadline_qty_per_day = 200
