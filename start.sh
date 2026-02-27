@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
+# ── If stdin is not a terminal (piped via curl), re-download & re-exec ──
+if [ ! -t 0 ]; then
+  SELF=$(mktemp /tmp/yc_bench_start.XXXXXX.sh)
+  curl -sSL https://raw.githubusercontent.com/collinear-ai/yc-bench/main/start.sh -o "$SELF"
+  exec bash "$SELF"
+fi
+
 # ── Install uv if missing ───────────────────────────────────────────────
 if ! command -v uv &>/dev/null; then
   echo "Installing uv..."
@@ -10,14 +17,12 @@ fi
 
 # ── Clone repo (skip if already inside it) ───────────────────────────────
 if [ ! -f "pyproject.toml" ] || ! grep -q "yc.bench" pyproject.toml 2>/dev/null; then
-  TMPDIR=$(mktemp -d)
-  echo "Cloning yc-bench into $TMPDIR/yc-bench..."
-  git clone --depth 1 https://github.com/collinear-ai/yc-bench.git "$TMPDIR/yc-bench"
-  cd "$TMPDIR/yc-bench"
+  DIR=$(mktemp -d)
+  echo "Cloning yc-bench into $DIR/yc-bench..."
+  git clone --depth 1 https://github.com/collinear-ai/yc-bench.git "$DIR/yc-bench"
+  cd "$DIR/yc-bench"
 fi
 
 # ── Install deps & launch ───────────────────────────────────────────────
-# When piped via curl, stdin is the pipe — reattach to the terminal
-# so interactive prompts work.
 uv sync --quiet
-exec uv run yc-bench start </dev/tty
+exec uv run yc-bench start
