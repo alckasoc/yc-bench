@@ -30,8 +30,8 @@ backend/yc_bench_log_*.txt
 agent.md
 
 # Benchmark runtime outputs
-db/
-logs/
+/db/
+/logs/
 
 # Claude session context — local only
 CLAUDE.md
