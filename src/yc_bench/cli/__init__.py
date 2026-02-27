@@ -95,6 +95,7 @@ def run_command_cli(
         "default", "--config",
         help="Preset name ('default', 'fast_test', 'high_reward') or path to a .toml file",
     ),
+    no_live: bool = typer.Option(False, "--no-live", help="Disable the live terminal dashboard"),
 ):
     """Run a full benchmark: migrate DB, seed world, run agent loop to completion."""
     from dotenv import find_dotenv, load_dotenv
@@ -109,6 +110,7 @@ def run_command_cli(
         company_name=company_name,
         start_date=start_date,
         config_name=config_name,
+        no_live=no_live,
     )
     raise SystemExit(run_benchmark(args))
 

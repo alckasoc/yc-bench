@@ -116,6 +116,8 @@ def run_agent_loop(
     command_executor=None,
     auto_advance_after_turns: int = 10,
     max_turns: int | None = None,
+    on_turn_start=None,
+    on_turn=None,
 ) -> RunState:
     run_state.start()
     turns_since_resume = 0  # consecutive turns without sim resume
@@ -145,6 +147,9 @@ def run_agent_loop(
                 turn_number=turn_num,
                 **snapshot,
             )
+
+        if on_turn_start is not None:
+            on_turn_start(turn_num)
 
         try:
             result = runtime.run_turn(
@@ -194,6 +199,11 @@ def run_agent_loop(
             commands_executed=commands_executed,
             turn_cost_usd=getattr(result, "turn_cost_usd", 0.0),
         )
+
+        if on_turn is not None:
+            with db_factory() as db:
+                post_snapshot = _snapshot_state(db, company_id)
+            on_turn(post_snapshot, run_state, commands_executed)
 
         logger.info(
             "Turn %d complete. Agent output length: %d, commands: %d",

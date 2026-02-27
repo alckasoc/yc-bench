@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,9 @@ from ..db.session import build_engine, build_session_factory, session_scope, ini
 from .args import parse_run_args
 
 logger = logging.getLogger(__name__)
+
+# Loggers that produce noisy debug output during LLM calls
+_NOISY_LOGGERS = ("litellm", "httpx", "httpcore", "openai", "LiteLLM")
 
 
 def _parse_date(date_str: str) -> datetime:
@@ -119,6 +123,33 @@ def _init_simulation(db_factory, args, experiment_cfg, horizon_years):
 # Main
 # ---------------------------------------------------------------------------
 
+def _redirect_all_logging_to_file(log_file: Path) -> None:
+    """Redirect ALL logging from the console to a file.
+
+    When the Rich Live dashboard is active, any output to stdout/stderr
+    breaks the in-place rendering, causing stacked panels. This removes
+    the root logger's console handlers and replaces them with a file handler.
+    """
+    log_file.parent.mkdir(exist_ok=True)
+    file_handler = logging.FileHandler(str(log_file), mode="a")
+    file_handler.setFormatter(logging.Formatter(
+        "[%(asctime)s] %(name)s %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+
+    # Replace all console handlers on root logger with the file handler
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(file_handler)
+
+    # Also ensure noisy loggers don't propagate (belt and suspenders)
+    for name in _NOISY_LOGGERS:
+        lg = logging.getLogger(name)
+        lg.propagate = False
+        lg.handlers.clear()
+        lg.addHandler(file_handler)
+
+
 def run_benchmark(args):
     """Run a full benchmark: migrate, seed, loop until terminal."""
     logging.basicConfig(
@@ -138,6 +169,15 @@ def run_benchmark(args):
     )
     # --horizon-years CLI flag overrides config; fall back to sim.horizon_years from config
     horizon_years = args.horizon_years if args.horizon_years is not None else experiment_cfg.sim.horizon_years
+
+    # Decide whether to use the live dashboard
+    use_live = sys.stdout.isatty() and not getattr(args, "no_live", False)
+
+    # When using the live dashboard, redirect all logging to file immediately
+    # so no console output interferes with Rich Live rendering.
+    if use_live:
+        log_file = Path("logs") / "debug.log"
+        _redirect_all_logging_to_file(log_file)
 
     logger.info(
         "YC-Bench starting: experiment=%s model=%s seed=%d horizon=%dy",
@@ -187,19 +227,54 @@ def run_benchmark(args):
         horizon_years=horizon_years,
     )
 
-    # 6. Run agent loop
-    loop_cfg = experiment_cfg.loop
-    final_state = run_agent_loop(
-        runtime=runtime,
-        db_factory=db_factory,
-        company_id=company_id,
-        run_state=run_state,
-        command_executor=run_command,
-        auto_advance_after_turns=loop_cfg.auto_advance_after_turns,
-        max_turns=loop_cfg.max_turns,
-    )
+    # 6. Set up live dashboard (or not)
+    dashboard = None
+    on_turn_start = None
+    on_turn = None
 
-    # 7. Save full rollout (with transcript) and print summary
+    if use_live:
+        from .dashboard import BenchmarkDashboard
+
+        dashboard = BenchmarkDashboard(
+            model=args.model,
+            seed=args.seed,
+            config_name=args.config_name,
+            db_factory=db_factory,
+            company_id=company_id,
+        )
+
+        def on_turn_start(turn_num):
+            dashboard.mark_turn_start(turn_num)
+
+        def on_turn(snapshot, rs, commands):
+            dashboard.update(snapshot, rs, commands)
+
+    # 7. Run agent loop
+    loop_cfg = experiment_cfg.loop
+    try:
+        if dashboard is not None:
+            dashboard.start()
+
+        final_state = run_agent_loop(
+            runtime=runtime,
+            db_factory=db_factory,
+            company_id=company_id,
+            run_state=run_state,
+            command_executor=run_command,
+            auto_advance_after_turns=loop_cfg.auto_advance_after_turns,
+            max_turns=loop_cfg.max_turns,
+            on_turn_start=on_turn_start,
+            on_turn=on_turn,
+        )
+    finally:
+        if dashboard is not None:
+            dashboard.stop()
+
+    # 8. Print final summary
+    if dashboard is not None:
+        dashboard.print_final_summary(final_state)
+
+    # 9. Save full rollout (with transcript) and print summary
     rollout = final_state.full_rollout()
     summary = final_state.summary()
     logger.info("Run complete: %s", json.dumps(summary, indent=2))
