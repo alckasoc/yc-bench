@@ -39,7 +39,7 @@ MODELS = {
     },
     "greedy": {
         "slug": "greedy_bot",
-        "label": "Greedy Bot",
+        "label": "Human Devised Rule",
         "color": NAVY,
     },
 }
@@ -140,7 +140,7 @@ def make_plot(runs):
         ("Sonnet 4.6", BLUE, "-", 4.0, 0.95),
         ("Gemini 3 Flash", ORANGE, "-", 4.0, 0.95),
         ("GPT-5.2", "#22C55E", "-", 4.0, 0.95),
-        ("Greedy Bot", NAVY, "--", 3.5, 0.75),
+        ("Human Devised Rule", NAVY, "--", 3.5, 0.75),
     ]
     legend_handles = []
     for lbl, clr, ls, lw, alpha in legend_items:

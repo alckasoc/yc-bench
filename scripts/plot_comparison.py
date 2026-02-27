@@ -41,7 +41,7 @@ MODELS = {
     },
     "greedy": {
         "slug": "greedy_bot",
-        "label": "Greedy Bot",
+        "label": "Human Devised Rule",
         "color": NAVY,
     },
 }
@@ -56,15 +56,17 @@ DIFF_COLORS = {"medium": BLUE, "hard": ORANGE, "nightmare": "#DC2626"}
 
 def load_logo_image(height_px=80):
     """Render the wordmark SVG to a high-res RGBA PIL image."""
-    import os, ctypes.util
-    # Ensure homebrew cairo is findable
-    if ctypes.util.find_library("cairo") is None:
-        brew_lib = "/opt/homebrew/lib"
-        if Path(brew_lib).exists():
-            os.environ.setdefault("DYLD_LIBRARY_PATH", brew_lib)
-    import cairosvg
-    from PIL import Image
-    import io
+    try:
+        import os, ctypes.util
+        if ctypes.util.find_library("cairo") is None:
+            brew_lib = "/opt/homebrew/lib"
+            if Path(brew_lib).exists():
+                os.environ.setdefault("DYLD_LIBRARY_PATH", brew_lib)
+        import cairosvg
+        from PIL import Image
+        import io
+    except ImportError:
+        return None
     p = ROOT / "plots" / "collinear_wordmark.svg"
     if not p.exists():
         return None
@@ -147,7 +149,7 @@ def make_plot(runs):
         ("Sonnet 4.6", BLUE, "-", 4.0, 0.95),
         ("Gemini 3 Flash", ORANGE, "-", 4.0, 0.95),
         ("GPT-5.2", "#22C55E", "-", 4.0, 0.95),
-        ("Greedy Bot", NAVY, "--", 3.5, 0.75),
+        ("Human Devised Rule", NAVY, "--", 3.5, 0.75),
     ]
     legend_handles = []
     for lbl, clr, ls, lw, alpha in legend_items:
