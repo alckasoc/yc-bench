@@ -219,6 +219,50 @@ Outputs:
 - `db/medium_1_gemini_gemini-3-flash-preview.db` — SQLite simulation state
 - `results/yc_bench_result_medium_1_gemini_gemini-3-flash-preview.json` — full rollout + transcript
 
+### Live dashboard
+
+When running in a terminal, YC-Bench displays an interactive dashboard that updates in-place after each turn:
+
+```
+╭──────────────────────────── YC-Bench ────────────────────────────╮
+│ Model        claude-haiku-4-5-20251001  seed=1  medium           │
+│ Turn         8                                                   │
+│ Sim Date     2025-03-06 -> 2026-01-01                            │
+│ Elapsed      0h 02m 34s                                          │
+│ Funds        $186,271.66 -$63,728 ██▇▃▁                          │
+│ Runway       5.8mo                                               │
+│ Tasks        3 active / 3 queued  2 done 1 fail                  │
+│ Team         5 people  $31,864.17/mo                              │
+│ Cost         $0.0212  (3.7s/turn)                                │
+│ Action       yc-bench task dispatch 7                            │
+│ Status       >> Turn 9: waiting for LLM...                       │
+╰──────────────────────────────────────────────────────────────────╯
+╭──────────────────────────── Tasks ───────────────────────────────╮
+│ >> Build GPU Cluster    $64,152  2025-02-03  Research ==== Training ====== │
+│ >> Deploy Observability $27,908  2025-01-22  Data ===...                   │
+│ .. Blue-Green Deploy    $30,780  2025-03-18  Backend ...... Data ......    │
+╰──────────────────────────────────────────────────────────────────╯
+╭──────────────────────────── Team ────────────────────────────────╮
+│ Alice Chen       $2,564  Training===. Frontend==.. Research=... │
+│ Bob Martinez    $14,947  Backend===. Research==.. Data==..      │
+╰──────────────────────────────────────────────────────────────────╯
+```
+
+The dashboard shows:
+- **Funds sparkline** — visual trend of your cash position over time
+- **Color-coded progress bars** per domain on each task (green = done, yellow = partial, red = low)
+- **Employee skill bars** — top 3 skills per team member with strength indicators
+- **Runway urgency** — green (safe), yellow (low), red blinking (critical)
+- **Salary heat** — expensive employees highlighted in red
+
+To disable the dashboard and see raw log output instead:
+
+```bash
+uv run yc-bench run --model ... --seed 1 --config medium --no-live
+```
+
+When `--no-live` is set (or stdout is not a terminal, e.g. piped to a file), the original logging output is used. Debug logs from LiteLLM/httpx are written to `logs/debug.log` when the dashboard is active.
+
 ### Run 5 models in parallel
 
 ```bash
