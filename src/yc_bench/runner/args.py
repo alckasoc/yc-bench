@@ -12,6 +12,7 @@ class RunArgs:
     company_name: str
     start_date: str
     config_name: str = "default"
+    no_live: bool = False
 
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -27,6 +28,10 @@ def build_parser():
         "--config", dest="config_name", default="default",
         help="Preset name ('default', 'fast_test', 'high_reward') or path to a .toml file",
     )
+    parser.add_argument(
+        "--no-live", action="store_true", default=False,
+        help="Disable the live terminal dashboard (show raw log output instead)",
+    )
     return parser
 
 def parse_run_args(argv):
@@ -40,6 +45,7 @@ def parse_run_args(argv):
         company_name=ns.company_name,
         start_date=ns.start_date,
         config_name=ns.config_name,
+        no_live=ns.no_live,
     )
 
 def _validate(ns, parser):
