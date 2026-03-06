@@ -63,10 +63,11 @@ def _sample_required_qty(rng, cfg):
     return int(sample_from_spec(rng, cfg.dist.required_qty))
 
 
-def _sample_requirements(rng, cfg):
+def _sample_requirements(rng, cfg, prestige=1):
     k = _sample_domain_count(rng, cfg)
     picked_domains = sample_without_replacement(rng, _ALL_DOMAINS, k)
-    return {domain: _sample_required_qty(rng, cfg) for domain in picked_domains}
+    scale = 1 + cfg.prestige_qty_scale * (prestige - 1)
+    return {domain: int(_sample_required_qty(rng, cfg) * scale) for domain in picked_domains}
 
 
 def _make_task(rng, cfg, prestige, serial, requirements):
@@ -97,8 +98,8 @@ def generate_tasks(*, run_seed, count, cfg=None):
     out = []
     for idx in range(1, count + 1):
         rng = streams.stream(f"task_{idx}")
-        requirements = _sample_requirements(rng, cfg)
         prestige = _sample_required_prestige(rng, cfg, index=idx - 1)
+        requirements = _sample_requirements(rng, cfg, prestige=prestige)
         out.append(_make_task(rng, cfg, prestige, serial=idx, requirements=requirements))
     return out
 
@@ -138,8 +139,8 @@ def generate_replacement_task(*, run_seed, replenish_counter, cfg=None):
         cfg = WorldConfig()
     streams = RngStreams(run_seed)
     rng = streams.stream(f"replenish_{replenish_counter}")
-    requirements = _sample_requirements(rng, cfg)
     prestige = _sample_required_prestige(rng, cfg)
+    requirements = _sample_requirements(rng, cfg, prestige=prestige)
     return _make_task(rng, cfg, prestige, serial=replenish_counter, requirements=requirements)
 
 

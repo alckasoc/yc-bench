@@ -129,7 +129,7 @@ def _query_detailed_snapshot(db_factory, company_id) -> dict[str, Any]:
                 ]
                 deadline_str = t.deadline.strftime("%Y-%m-%d") if t.deadline else "-"
                 tasks_detail.append(TaskInfo(
-                    title=t.title[:20],
+                    title=t.title,
                     status=status.value,
                     prestige=t.required_prestige,
                     reward_dollars=t.reward_funds_cents / 100.0,
@@ -398,7 +398,7 @@ class BenchmarkDashboard:
                 prog_parts.append(f"{tag} {bar}")
             progress_str = " ".join(prog_parts)
 
-            table.add_row(marker, t.title[:20], reward, t.deadline, progress_str)
+            table.add_row(marker, t.title, reward, t.deadline, progress_str)
 
         remaining = len(s.tasks_detail) - 6
         if remaining > 0:

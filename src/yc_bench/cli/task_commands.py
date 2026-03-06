@@ -57,20 +57,21 @@ def task_accept(
         if task.status != TaskStatus.MARKET:
             error_output(f"Task {task_id} is not in market status (current: {task.status.value}).")
 
-        # Validate prestige requirement
+        # Validate per-domain prestige requirement
         company_id = sim_state.company_id
+        reqs = db.query(TaskRequirement).filter(TaskRequirement.task_id == tid).all()
         prestige_rows = db.query(CompanyPrestige).filter(
             CompanyPrestige.company_id == company_id
         ).all()
-        max_prestige = max((float(p.prestige_level) for p in prestige_rows), default=1.0)
+        prestige_map = {p.domain: float(p.prestige_level) for p in prestige_rows}
 
-        if task.required_prestige > max_prestige:
-            error_output(
-                f"Company max prestige ({max_prestige}) does not meet task requirement ({task.required_prestige})."
-            )
-
-        # Compute deadline
-        reqs = db.query(TaskRequirement).filter(TaskRequirement.task_id == tid).all()
+        for req in reqs:
+            domain_prestige = prestige_map.get(req.domain, 1.0)
+            if task.required_prestige > domain_prestige:
+                error_output(
+                    f"Company prestige in {req.domain.value} ({domain_prestige:.1f}) "
+                    f"does not meet task requirement ({task.required_prestige})."
+                )
         max_domain_qty = max(float(r.required_qty) for r in reqs)
         accepted_at = sim_state.sim_time
         deadline = _compute_deadline(accepted_at, max_domain_qty)

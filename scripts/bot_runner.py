@@ -91,15 +91,15 @@ def _compute_deadline(accepted_at, max_domain_qty, cfg):
 
 
 def _build_candidates(db, company_id, sim_state, world_cfg, emp_skills):
-    """Build CandidateTask list for all market tasks the company can see."""
+    """Build CandidateTask list for all market tasks the company can accept (per-domain prestige gating)."""
     prestige_rows = db.query(CompanyPrestige).filter(
         CompanyPrestige.company_id == company_id
     ).all()
-    max_prestige = max((float(p.prestige_level) for p in prestige_rows), default=1.0)
+    prestige_map = {p.domain: float(p.prestige_level) for p in prestige_rows}
+    min_prestige = min(prestige_map.values()) if prestige_map else 1.0
 
     market_tasks = db.query(Task).filter(
         Task.status == TaskStatus.MARKET,
-        Task.required_prestige <= int(max_prestige),
     ).order_by(Task.reward_funds_cents.desc()).all()
 
     all_skills = [{d: r for d, r in e["skills"].items()} for e in emp_skills]
@@ -109,6 +109,15 @@ def _build_candidates(db, company_id, sim_state, world_cfg, emp_skills):
         reqs = db.query(TaskRequirement).filter(
             TaskRequirement.task_id == task.id
         ).all()
+
+        # Per-domain prestige check: all required domains must meet threshold
+        meets_prestige = all(
+            prestige_map.get(r.domain, 1.0) >= task.required_prestige
+            for r in reqs
+        )
+        if not meets_prestige:
+            continue
+
         max_domain_qty = max(float(r.required_qty) for r in reqs)
         task_reqs = [{"domain": r.domain, "required_qty": float(r.required_qty)} for r in reqs]
 
@@ -128,7 +137,7 @@ def _build_candidates(db, company_id, sim_state, world_cfg, emp_skills):
             is_completable=is_completable,
         ))
 
-    return candidates, max_prestige
+    return candidates, min_prestige
 
 
 # ── Strategy functions ──────────────────────────────────────────────────────

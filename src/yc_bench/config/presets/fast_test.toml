@@ -19,8 +19,7 @@ auto_advance_after_turns = 5
 max_turns                = 50
 
 [world]
-num_employees    = 5
-num_market_tasks = 100
+# Inherits num_employees=10, num_market_tasks=200 from default.
 
 # Deadline based on max per-domain qty (parallel domain work).
 deadline_qty_per_day = 150

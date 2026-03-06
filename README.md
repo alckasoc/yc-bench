@@ -45,7 +45,7 @@ Outputs a SQLite DB in `db/` and a JSON rollout in `results/`.
 ### Run multiple models in parallel
 
 ```bash
-bash scripts/run_benchmark.sh --seed 1 --config challenge
+bash scripts/run_benchmark.sh --seed 1 --config hard
 ```
 
 ---
