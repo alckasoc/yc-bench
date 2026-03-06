@@ -344,13 +344,12 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
                 company_id=None,
                 status=TaskStatus.MARKET,
                 title=replacement.title,
-                description=replacement.description,
                 required_prestige=replacement.required_prestige,
                 reward_funds_cents=replacement.reward_funds_cents,
                 reward_prestige_delta=replacement.reward_prestige_delta,
                 skill_boost_pct=replacement.skill_boost_pct,
                 accepted_at=None, deadline=None, completed_at=None,
-                success=None, halfway_event_emitted=False,
+                success=None, progress_milestone_pct=0,
             )
             db.add(replacement_row)
             for domain, qty in replacement.requirements.items():
@@ -375,7 +374,7 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
 
             recalculate_etas(db, company_id, sim_state.sim_time,
                              impacted_task_ids={best_task.id},
-                             half_threshold=world_cfg.task_half_threshold)
+                             milestones=world_cfg.task_progress_milestones)
 
             task_cycles_used += 1
 

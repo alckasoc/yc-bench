@@ -82,8 +82,8 @@ reward_prestige_scale = 0.55    # hardened: was 0.3
 deadline_qty_per_day   = 320.0    # hardened: was 200.0
 deadline_min_biz_days  = 7
 
-# --- Progress milestone ---
-task_half_threshold = 0.5
+# --- Progress milestones (checkpoint events at these completion fractions) ---
+task_progress_milestones = [0.25, 0.5, 0.75]
 
 # --- Business hours ---
 workday_start_hour = 9
@@ -161,20 +161,20 @@ share      = 0.50
 min_cents  = 200_000    # $2,000/month
 max_cents  = 400_000    # $4,000/month
 rate_min   = 1.0        # units/hour
-rate_max   = 6.5
+rate_max   = 4.0
 
 [world.salary_mid]
 name       = "mid"
 share      = 0.35
 min_cents  = 600_000    # $6,000/month
 max_cents  = 800_000    # $8,000/month
-rate_min   = 3.5
-rate_max   = 8.5
+rate_min   = 4.0
+rate_max   = 7.0
 
 [world.salary_senior]
 name       = "senior"
 share      = 0.15
 min_cents  = 1_000_000  # $10,000/month
 max_cents  = 1_500_000  # $15,000/month
-rate_min   = 5.5
+rate_min   = 7.0
 rate_max   = 10.0

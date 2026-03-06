@@ -95,7 +95,6 @@ def task_accept(
             company_id=None,
             status=TaskStatus.MARKET,
             title=replacement.title,
-            description=replacement.description,
             required_prestige=replacement.required_prestige,
             reward_funds_cents=replacement.reward_funds_cents,
             reward_prestige_delta=replacement.reward_prestige_delta,
@@ -104,7 +103,7 @@ def task_accept(
             deadline=None,
             completed_at=None,
             success=None,
-            halfway_event_emitted=False,
+            progress_milestone_pct=0,
         )
         db.add(replacement_row)
 
@@ -185,7 +184,7 @@ def task_assign(
                 if t and t.status == TaskStatus.ACTIVE:
                     impacted.add(t.id)
             if impacted:
-                recalculate_etas(db, sim_state.company_id, sim_state.sim_time, impacted, half_threshold=_get_world_cfg().task_half_threshold)
+                recalculate_etas(db, sim_state.company_id, sim_state.sim_time, impacted, milestones=_get_world_cfg().task_progress_milestones)
 
         # Return current assignment list
         assignments = db.query(TaskAssignment).filter(TaskAssignment.task_id == tid).all()
@@ -251,7 +250,7 @@ def task_dispatch(
                 peer_task = db.query(Task).filter(Task.id == pa.task_id).one_or_none()
                 if peer_task and peer_task.status == TaskStatus.ACTIVE:
                     impacted.add(peer_task.id)
-        recalculate_etas(db, sim_state.company_id, sim_state.sim_time, impacted, half_threshold=_get_world_cfg().task_half_threshold)
+        recalculate_etas(db, sim_state.company_id, sim_state.sim_time, impacted, milestones=_get_world_cfg().task_progress_milestones)
 
         json_output({
             "task_id": str(task.id),
@@ -353,7 +352,6 @@ def task_inspect(
         json_output({
             "task_id": str(task.id),
             "title": task.title,
-            "description": task.description,
             "status": task.status.value,
             "required_prestige": task.required_prestige,
             "reward_funds_cents": task.reward_funds_cents,
@@ -442,7 +440,7 @@ def task_cancel(
                     if t and t.status == TaskStatus.ACTIVE:
                         impacted.add(t.id)
         if impacted:
-            recalculate_etas(db, sim_state.company_id, sim_state.sim_time, impacted, half_threshold=_get_world_cfg().task_half_threshold)
+            recalculate_etas(db, sim_state.company_id, sim_state.sim_time, impacted, milestones=_get_world_cfg().task_progress_milestones)
 
         # Bankruptcy check
         company = db.query(Company).filter(Company.id == sim_state.company_id).one()

@@ -74,13 +74,16 @@ def dispatch_event(db: Session, event: SimEvent, sim_time: datetime, company_id:
     """Route event to appropriate handler. Returns result dict."""
     if event.event_type == EventType.TASK_HALF_PROGRESS:
         result = handle_task_half(db, event)
-        return {"type": "task_half", "task_id": str(result.task_id), "handled": result.handled}
+        # Recalculate ETAs so the next milestone is scheduled
+        from ..config import get_world_config
+        recalculate_etas(db, company_id, sim_time, milestones=get_world_config().task_progress_milestones)
+        return {"type": "task_half", "task_id": str(result.task_id), "milestone_pct": result.milestone_pct, "handled": result.handled}
 
     elif event.event_type == EventType.TASK_COMPLETED:
         result = handle_task_complete(db, event, sim_time)
         # Recalculate ETAs — freed employees change topology
         from ..config import get_world_config
-        recalculate_etas(db, company_id, sim_time, half_threshold=get_world_config().task_half_threshold)
+        recalculate_etas(db, company_id, sim_time, milestones=get_world_config().task_progress_milestones)
         return {
             "type": "task_completed",
             "task_id": str(result.task_id),

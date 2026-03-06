@@ -128,8 +128,8 @@ class WorldConfig(BaseModel):
     deadline_qty_per_day: float = 200.0  # work units assumed completable per business day
     deadline_min_biz_days: int = 7
 
-    # --- Progress milestone ---
-    task_half_threshold: float = 0.5
+    # --- Progress milestones (fraction thresholds that trigger checkpoint events) ---
+    task_progress_milestones: list[float] = Field(default_factory=lambda: [0.25, 0.5, 0.75])
 
     # --- Business hours ---
     workday_start_hour: int = 9
@@ -143,21 +143,21 @@ class WorldConfig(BaseModel):
         default_factory=lambda: SalaryTierConfig(
             name="junior", share=0.50,
             min_cents=200_000, max_cents=400_000,
-            rate_min=1.0, rate_max=6.5,
+            rate_min=1.0, rate_max=4.0,
         )
     )
     salary_mid: SalaryTierConfig = Field(
         default_factory=lambda: SalaryTierConfig(
             name="mid", share=0.35,
             min_cents=600_000, max_cents=800_000,
-            rate_min=3.5, rate_max=8.5,
+            rate_min=4.0, rate_max=7.0,
         )
     )
     salary_senior: SalaryTierConfig = Field(
         default_factory=lambda: SalaryTierConfig(
             name="senior", share=0.15,
             min_cents=1_000_000, max_cents=1_500_000,
-            rate_min=5.5, rate_max=10.0,
+            rate_min=7.0, rate_max=10.0,
         )
     )
 

@@ -18,13 +18,10 @@ SPARK_CHARS = "▁▂▃▄▅▆▇█"
 
 # Domain → (display name, color) for styled inline display
 DOMAIN_STYLE = {
-    "system":   ("System",   "bright_cyan"),
-    "research": ("Research", "bright_magenta"),
-    "data":     ("Data",     "bright_blue"),
-    "frontend": ("Frontend", "bright_yellow"),
-    "backend":  ("Backend",  "bright_green"),
-    "training": ("Training", "red"),
-    "hardware": ("Hardware", "white"),
+    "research":         ("Research",  "bright_magenta"),
+    "inference":        ("Inference", "bright_cyan"),
+    "data_environment": ("Data/Env",  "bright_blue"),
+    "training":         ("Training",  "red"),
 }
 
 
@@ -132,7 +129,7 @@ def _query_detailed_snapshot(db_factory, company_id) -> dict[str, Any]:
                 ]
                 deadline_str = t.deadline.strftime("%Y-%m-%d") if t.deadline else "-"
                 tasks_detail.append(TaskInfo(
-                    title=t.title,
+                    title=t.title[:20],
                     status=status.value,
                     prestige=t.required_prestige,
                     reward_dollars=t.reward_funds_cents / 100.0,

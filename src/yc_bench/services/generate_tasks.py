@@ -8,13 +8,11 @@ from ..config.sampling import sample_from_spec
 from ..config.schema import WorldConfig
 from ..db.models.company import Domain
 from .rng import RngStreams, sample_without_replacement
-from .task_catalog import pick_task_text
 
 
 @dataclass(frozen=True)
 class GeneratedTask:
     title: str
-    description: str
     required_prestige: int
     reward_funds_cents: int
     reward_prestige_delta: float
@@ -25,7 +23,7 @@ class GeneratedTask:
     deadline: datetime | None
     completed_at: datetime | None
     success: bool | None
-    halfway_event_emitted: bool
+    progress_milestone_pct: int
     requirements: dict[str, int]
 
 
@@ -71,18 +69,9 @@ def _sample_requirements(rng, cfg):
     return {domain: _sample_required_qty(rng, cfg) for domain in picked_domains}
 
 
-def _pick_title_desc(rng, primary_domain, serial):
-    title, description = pick_task_text(rng, primary_domain)
-    domain_str = primary_domain.value if hasattr(primary_domain, "value") else str(primary_domain)
-    title = f"{title} [{domain_str.upper()}-{serial}]"
-    return title, description
-
-
 def _make_task(rng, cfg, prestige, serial, requirements):
-    title, description = _pick_title_desc(rng, next(iter(requirements)), serial)
     return GeneratedTask(
-        title=title,
-        description=description,
+        title=f"Task-{serial}",
         required_prestige=prestige,
         reward_funds_cents=_sample_reward_funds_cents(rng, cfg, prestige=prestige),
         reward_prestige_delta=_sample_reward_prestige_delta(rng, cfg),
@@ -93,7 +82,7 @@ def _make_task(rng, cfg, prestige, serial, requirements):
         deadline=None,
         completed_at=None,
         success=None,
-        halfway_event_emitted=False,
+        progress_milestone_pct=0,
         requirements=requirements,
     )
 
@@ -122,7 +111,6 @@ def build_task_rows(*, run_seed, count, cfg=None):
     for task in generated:
         task_rows.append({
             "title": task.title,
-            "description": task.description,
             "required_prestige": task.required_prestige,
             "reward_funds_cents": task.reward_funds_cents,
             "reward_prestige_delta": task.reward_prestige_delta,
@@ -133,7 +121,7 @@ def build_task_rows(*, run_seed, count, cfg=None):
             "deadline": task.deadline,
             "completed_at": task.completed_at,
             "success": task.success,
-            "halfway_event_emitted": task.halfway_event_emitted,
+            "progress_milestone_pct": task.progress_milestone_pct,
         })
         for domain, qty in task.requirements.items():
             requirement_rows.append({
