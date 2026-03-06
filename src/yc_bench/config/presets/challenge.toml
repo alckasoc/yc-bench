@@ -50,7 +50,7 @@ max_turns = 500
 [world]
 num_employees    = 5
 num_market_tasks = 200
-deadline_qty_per_day = 200.0
+deadline_qty_per_day = 100.0
 
 # ---------------------------------------------------------------------------
 # Task size: mode=700 (smaller than hardened default 1400) so tasks complete

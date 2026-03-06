@@ -52,8 +52,10 @@ auto_advance_after_turns = 10
 num_employees    = 8
 num_market_tasks = 300
 
-# Razor deadlines: 350 qty/day — need near-full team on every task.
-deadline_qty_per_day = 350.0
+# Razor deadlines: 1600/200 = 8 days.
+# 1 task with 5 per domain → 7.7 days. Barely makes it.
+# 2 concurrent tasks → guaranteed miss.
+deadline_qty_per_day = 200.0
 
 # Catastrophic penalties — there is no good exit from a bad accept.
 penalty_fail_multiplier   = 2.0

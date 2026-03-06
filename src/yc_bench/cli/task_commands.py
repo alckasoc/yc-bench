@@ -27,12 +27,12 @@ def _get_world_cfg():
 task_app = typer.Typer(help="Task management commands.")
 
 
-def _compute_deadline(accepted_at: datetime, total_required_qty: float, cfg=None) -> datetime:
-    """Deadline: cfg.deadline_qty_per_day units per business day, minimum cfg.deadline_min_biz_days days."""
+def _compute_deadline(accepted_at: datetime, max_domain_qty: float, cfg=None) -> datetime:
+    """Deadline based on the heaviest single domain (domains are worked in parallel)."""
     if cfg is None:
         cfg = _get_world_cfg()
     work_hours = cfg.workday_end_hour - cfg.workday_start_hour
-    biz_days = max(cfg.deadline_min_biz_days, int(total_required_qty / cfg.deadline_qty_per_day))
+    biz_days = max(cfg.deadline_min_biz_days, int(max_domain_qty / cfg.deadline_qty_per_day))
     return add_business_hours(accepted_at, Decimal(str(biz_days)) * Decimal(str(work_hours)))
 
 
@@ -71,9 +71,9 @@ def task_accept(
 
         # Compute deadline
         reqs = db.query(TaskRequirement).filter(TaskRequirement.task_id == tid).all()
-        total_qty = sum(float(r.required_qty) for r in reqs)
+        max_domain_qty = max(float(r.required_qty) for r in reqs)
         accepted_at = sim_state.sim_time
-        deadline = _compute_deadline(accepted_at, total_qty)
+        deadline = _compute_deadline(accepted_at, max_domain_qty)
 
         # Transition task
         task.status = TaskStatus.PLANNED

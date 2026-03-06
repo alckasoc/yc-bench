@@ -125,7 +125,7 @@ class WorldConfig(BaseModel):
     reward_prestige_scale: float = 0.3
 
     # --- Deadline computation ---
-    deadline_qty_per_day: float = 200.0  # work units assumed completable per business day
+    deadline_qty_per_day: float = 150.0  # max per-domain qty / this = deadline days
     deadline_min_biz_days: int = 7
 
     # --- Progress milestones (fraction thresholds that trigger checkpoint events) ---

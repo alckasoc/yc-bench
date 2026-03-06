@@ -31,8 +31,8 @@ auto_advance_after_turns = 5
 num_employees    = 3
 num_market_tasks = 50
 
-# Very generous deadlines: 100 qty/day → most tasks get 7-day minimum.
-deadline_qty_per_day = 100.0
+# Very generous deadlines: 30 qty/day → most tasks get 13+ day deadline.
+deadline_qty_per_day = 30.0
 
 # Negligible penalties — mistakes barely hurt.
 penalty_fail_multiplier   = 0.3

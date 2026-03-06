@@ -84,9 +84,9 @@ def estimate_completion_hours(task_reqs, employee_skills, n_concurrent_tasks=1):
     return max_hours
 
 
-def _compute_deadline(accepted_at, total_required_qty, cfg):
+def _compute_deadline(accepted_at, max_domain_qty, cfg):
     work_hours = cfg.workday_end_hour - cfg.workday_start_hour
-    biz_days = max(cfg.deadline_min_biz_days, int(total_required_qty / cfg.deadline_qty_per_day))
+    biz_days = max(cfg.deadline_min_biz_days, int(max_domain_qty / cfg.deadline_qty_per_day))
     return add_business_hours(accepted_at, Decimal(str(biz_days)) * Decimal(str(work_hours)))
 
 
@@ -109,14 +109,14 @@ def _build_candidates(db, company_id, sim_state, world_cfg, emp_skills):
         reqs = db.query(TaskRequirement).filter(
             TaskRequirement.task_id == task.id
         ).all()
-        total_qty = sum(float(r.required_qty) for r in reqs)
+        max_domain_qty = max(float(r.required_qty) for r in reqs)
         task_reqs = [{"domain": r.domain, "required_qty": float(r.required_qty)} for r in reqs]
 
         completion_hours = estimate_completion_hours(task_reqs, all_skills, n_concurrent_tasks=1)
 
         is_completable = False
         if completion_hours is not None:
-            deadline = _compute_deadline(sim_state.sim_time, total_qty, world_cfg)
+            deadline = _compute_deadline(sim_state.sim_time, max_domain_qty, world_cfg)
             completion_time = add_business_hours(sim_state.sim_time, completion_hours)
             is_completable = completion_time <= deadline
 
@@ -324,12 +324,12 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
             reqs = db.query(TaskRequirement).filter(
                 TaskRequirement.task_id == best_task.id
             ).all()
-            total_qty = sum(float(r.required_qty) for r in reqs)
+            max_domain_qty = max(float(r.required_qty) for r in reqs)
 
             best_task.status = TaskStatus.PLANNED
             best_task.company_id = company_id
             best_task.accepted_at = sim_state.sim_time
-            best_task.deadline = _compute_deadline(sim_state.sim_time, total_qty, world_cfg)
+            best_task.deadline = _compute_deadline(sim_state.sim_time, max_domain_qty, world_cfg)
 
             # Generate replacement
             counter = sim_state.replenish_counter

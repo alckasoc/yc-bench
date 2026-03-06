@@ -78,8 +78,9 @@ penalty_cancel_multiplier  = 2.0    # hardened: was 1.2
 reward_prestige_scale = 0.55    # hardened: was 0.3
 
 # --- Deadline ---
-# 320 units/day is ~60% tighter than the base 200 — need real employee-hours.
-deadline_qty_per_day   = 320.0    # hardened: was 200.0
+# Deadline = max(deadline_min_biz_days, max_domain_qty / deadline_qty_per_day).
+# Domains are worked in parallel, so deadline scales with heaviest domain, not sum.
+deadline_qty_per_day   = 150.0
 deadline_min_biz_days  = 7
 
 # --- Progress milestones (checkpoint events at these completion fractions) ---
