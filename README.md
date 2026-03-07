@@ -65,7 +65,7 @@ The simulation ends on **bankruptcy** (funds < 0 after payroll), **horizon end**
 
 ### Key mechanics
 
-- **Funds**: start at $250K. Monthly payroll is deducted automatically. Task rewards scale with prestige (`base × (1 + 0.55 × (prestige − 1))`).
+- **Funds**: starting capital varies by preset ($80K–$250K). Monthly payroll is deducted automatically. Task rewards scale with prestige (`base × (1 + scale × (prestige − 1))`).
 - **4 domains**: `research · inference · data/environment · training`. Each domain tracks prestige independently in [1.0, 10.0].
 - **Per-domain prestige gating**: a task's required prestige is checked against **each** of its required domains. The agent must climb prestige broadly, not just in one domain.
 - **Prestige decay**: every domain loses prestige daily. Neglected domains decay back toward 1.0. The agent must stay active across domains to maintain market access.
@@ -110,7 +110,7 @@ All presets use 10 employees and 200 market tasks. Difficulty comes from deadlin
 | Config | Deadline pressure | Prestige mode | What it tests |
 |--------|------------------|---------------|---------------|
 | **tutorial** | Very relaxed | 1 | Basic accept→assign→dispatch loop |
-| **easy** | Relaxed | 2 | Throughput awareness |
+| **easy** | Relaxed | 1 | Throughput awareness |
 | **medium** | Moderate | 3 | Prestige climbing + domain specialization |
 | **hard** | Tight | 4 | Precise ETA reasoning + capacity planning |
 | **nightmare** | Razor-thin | 5 | Sustained perfection under compounding payroll |
@@ -121,44 +121,7 @@ See `default.toml` for the full list of tunable parameters.
 
 ## Benchmark results
 
-### Sonnet 4.6 vs Gemini 3 Flash vs GPT-5.2 — 1-year horizon, 3 seeds per config
-
-![3-model comparison](plots/sonnet_vs_gemini.png)
-
-#### Survival rates
-
-| Config | Sonnet 4.6 | Gemini 3 Flash | GPT-5.2 |
-|--------|-----------|----------------|---------|
-| **medium** | 3/3 | 3/3 | 3/3 |
-| **hard** | 1/3 | 2/3 | 2/3 |
-| **nightmare** | 1/3 | 3/3 | 2/3 |
-
-#### Final funds (bankrupt = funds < 0)
-
-| Config | Seed | Sonnet 4.6 | Gemini 3 Flash | GPT-5.2 |
-|--------|------|-----------|----------------|---------|
-| medium | 1 | **$9.1M** | **$9.5M** | **$1.8M** |
-| medium | 2 | **$6.1M** | **$11.0M** | **$321K** |
-| medium | 3 | **$107K** | **$15.8M** | **$28K** |
-| hard | 1 | bankrupt | bankrupt | bankrupt |
-| hard | 2 | **$63K** | **$412K** | **$15.7M** |
-| hard | 3 | bankrupt | **$21.9M** | **$43.5M** |
-| nightmare | 1 | bankrupt | **$2.1M** | bankrupt |
-| nightmare | 2 | **$10.1M** | **$214K** | **$2.2M** |
-| nightmare | 3 | bankrupt | **$805K** | **$23.6M** |
-
-**Overall: Gemini 8/9 · GPT-5.2 7/9 · Sonnet 5/9**
-
-#### Key findings
-
-- **Gemini leads on consistency** (8/9 survival). The only model to sweep all 3 nightmare seeds.
-- **GPT-5.2 has the highest ceiling.** Hard seed 3: $43.5M vs Gemini's $21.9M. When it survives, it tends to outperform by a wide margin.
-- **Sonnet is high-variance.** Nightmare seed 2: $10.1M (best nightmare result), but 4/9 bankruptcies overall.
-- **Win rate predicts survival.** Every run with >58% task win rate survived. Every run below 40% went bankrupt.
-
-#### Prestige specialization
-
-![Prestige radar](plots/prestige_radar.png)
+*Results pending — re-running benchmarks with updated economics.*
 
 ---
 
