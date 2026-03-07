@@ -56,8 +56,8 @@ bash scripts/run_benchmark.sh --seed 1 --config hard
 
 ### Core loop
 
-1. Agent calls `yc-bench sim resume` to advance time to the next event.
-2. The engine flushes task progress, fires due events, applies payroll.
+1. Agent calls `yc-bench sim resume` to advance time to the next event or monthly payroll.
+2. The engine flushes task progress, applies prestige decay, fires due events, applies payroll.
 3. Agent reads wake events and decides: accept tasks, assign employees, dispatch, cancel.
 4. Repeat until bankruptcy or horizon end.
 
@@ -67,10 +67,12 @@ The simulation ends on **bankruptcy** (funds < 0 after payroll), **horizon end**
 
 - **Funds**: start at $250K. Monthly payroll is deducted automatically. Task rewards scale with prestige (`base × (1 + 0.55 × (prestige − 1))`).
 - **4 domains**: `research · inference · data/environment · training`. Each domain tracks prestige independently in [1.0, 10.0].
-- **Prestige gating**: tasks require a minimum prestige level. Most tasks need prestige 3–5, so the agent must climb from 1.0 by completing easier tasks first. First 10 market tasks are stratified `[1,1,1,1,2,2,2,3,3,4]` to bootstrap progression.
+- **Per-domain prestige gating**: a task's required prestige is checked against **each** of its required domains. The agent must climb prestige broadly, not just in one domain.
+- **Prestige decay**: every domain loses prestige daily. Neglected domains decay back toward 1.0. The agent must stay active across domains to maintain market access.
+- **Prestige-scaled work volume**: higher-prestige tasks require proportionally more work. Higher prestige pays more but demands more capacity.
 - **Employees**: 10 employees across 3 tiers (junior/mid/senior). The agent sees only each employee's tier and salary — not their per-domain skill rates. A junior can secretly be a superstar in one domain, so the agent must infer productivity from task progress observations.
 - **Throughput splitting**: an employee assigned to N active tasks has `effective_rate = base_rate / N`. Focus beats breadth.
-- **Task success**: on-time completion awards funds + prestige + skill boosts + 1% salary bump (compounding payroll pressure). Late completion penalises prestige (1.4×). Cancellation penalises harder (2.0×).
+- **Task success**: on-time completion awards funds + prestige + skill boosts + 1% salary bump (compounding payroll pressure). Late completion penalises prestige. Cancellation penalises harder.
 - **Progress checkpoints**: the agent is woken at 25%, 50%, 75%, and 100% completion — providing data points to estimate employee productivity.
 - **Scratchpad**: persistent notes in the DB that survive context truncation (only last 20 conversation rounds are kept).
 
@@ -92,7 +94,7 @@ yc-bench report monthly                          # P&L per month
 yc-bench task accept --task-id UUID              # pull from market
 yc-bench task assign --task-id UUID --employee-id UUID
 yc-bench task dispatch --task-id UUID            # start work
-yc-bench task cancel --task-id UUID --reason ""  # cancel (2× prestige penalty)
+yc-bench task cancel --task-id UUID --reason ""  # cancel (prestige penalty)
 yc-bench sim resume                              # advance time
 yc-bench scratchpad write/append/clear           # persistent memory
 ```
@@ -103,13 +105,15 @@ yc-bench scratchpad write/append/clear           # persistent memory
 
 Experiment presets live in `src/yc_bench/config/presets/` as TOML files. Pass the preset name via `--config`.
 
-| Config | Employees | Tasks | Tests |
-|--------|-----------|-------|-------|
-| **tutorial** | 3 | 50 | Basic accept→assign→dispatch loop |
-| **easy** | 5 | 100 | Throughput awareness |
-| **medium** | 5 | 150 | Prestige climbing + domain specialization |
-| **hard** | 7 | 200 | Precise ETA reasoning |
-| **nightmare** | 8 | 300 | Sustained perfection under compounding payroll |
+All presets use 10 employees and 200 market tasks. Difficulty comes from deadline pressure, penalty severity, prestige distribution, and task size.
+
+| Config | Deadline pressure | Prestige mode | What it tests |
+|--------|------------------|---------------|---------------|
+| **tutorial** | Very relaxed | 1 | Basic accept→assign→dispatch loop |
+| **easy** | Relaxed | 2 | Throughput awareness |
+| **medium** | Moderate | 3 | Prestige climbing + domain specialization |
+| **hard** | Tight | 4 | Precise ETA reasoning + capacity planning |
+| **nightmare** | Razor-thin | 5 | Sustained perfection under compounding payroll |
 
 See `default.toml` for the full list of tunable parameters.
 
