@@ -1,0 +1,6 @@
+extends = "hard"
+name = "hard_long_timeout"
+description = "Hard config with 600s timeout for slow models"
+
+[agent]
+request_timeout_seconds = 600.0
