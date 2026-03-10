@@ -12,6 +12,7 @@ An LLM agent is dropped into the role of CEO of a small AI startup. It must:
 - Assign employees to tasks across 4 technical domains
 - Manage cash flow (payroll, rewards, penalties)
 - Build prestige in each domain to unlock higher-tier tasks
+- Build trust with clients to unlock better payouts and reduced work requirements
 - Survive until the simulation horizon ends without going bankrupt
 
 ## Key Metrics (~4,975 lines of Python)
@@ -96,3 +97,4 @@ An LLM agent is dropped into the role of CEO of a small AI startup. It must:
 | [08_cli_interface.md](08_cli_interface.md) | CLI command groups and JSON output |
 | [09_configuration.md](09_configuration.md) | Config schema, presets, and world generation |
 | [10_runner_orchestration.md](10_runner_orchestration.md) | Benchmark runner, dashboard, and session |
+| [11_client_trust.md](11_client_trust.md) | Client trust mechanics, tiers, and reward scaling |

@@ -51,6 +51,27 @@ def task_accept(task_id):
 
 **Design choice**: Prestige check is per-domain. A task requiring prestige 3.0 with requirements in `research` and `inference` needs prestige >= 3.0 in BOTH domains. This prevents gaming by maxing one domain.
 
+### Trust Gating at Accept Time
+
+~20% of tasks have a `required_trust` field. At acceptance, the agent's trust with the task's client must meet the threshold:
+
+```python
+if task.required_trust > 0 and task.client_id:
+    client_trust = get_trust(company_id, task.client_id)
+    if client_trust < task.required_trust:
+        reject("Insufficient trust with client")
+```
+
+**Design choice**: Trust gating is per-client, not global. High-trust tasks are the most valuable opportunities, gated behind relationship-building with specific clients. See [11_client_trust.md](11_client_trust.md) for full trust mechanics.
+
+### Client Assignment and Reward Scaling
+
+Each task belongs to a specific client. At acceptance:
+
+1. **Reward scaling**: `actual_reward = listed_reward × trust_multiplier` (50% at trust 0, scaling up with trust and client tier)
+2. **Work reduction**: `required_qty *= (1 - trust_work_reduction_max × trust/trust_max)` (up to 40% less work at max trust)
+3. **Replacement generation**: A new market task replaces the accepted one, biased toward the same client's specialty domains
+
 ### Cancel Penalties
 
 Cancelling an active task incurs:
@@ -142,3 +163,9 @@ The `market browse` command supports:
 - Pagination (offset/limit)
 
 All output is JSON for agent consumption.
+
+### Sim Resume Blocking
+
+`yc-bench sim resume` is **blocked** when there are zero active tasks, returning `{"ok": false}` instead of advancing time. This prevents catastrophic payroll drain when the agent has no work in progress. The agent loop filters blocked responses and treats them as no-ops.
+
+The auto-advance mechanism (which forces `sim resume` after N consecutive turns without one) also checks for active tasks before advancing.

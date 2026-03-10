@@ -167,21 +167,37 @@ def run_agent_loop(
         commands_executed = _extract_commands(result.raw_result)
 
         resume_payload = result.resume_payload
+        # Ignore blocked sim resume responses (ok=False means no time actually advanced)
+        if resume_payload is not None and not resume_payload.get("ok", True):
+            logger.info("Turn %d: sim resume was blocked (no active tasks).", turn_num)
+            resume_payload = None
         if result.checkpoint_advanced and resume_payload is not None:
             logger.info("Turn %d: agent called sim resume.", turn_num)
             turns_since_resume = 0
         else:
             turns_since_resume += 1
             if command_executor is not None and turns_since_resume >= auto_advance_after_turns:
-                logger.info(
-                    "Turn %d: %d consecutive turns without sim resume; auto-advancing.",
-                    turn_num, turns_since_resume,
-                )
-                resume_payload, err = _auto_resume(command_executor)
-                if err:
-                    logger.warning("Auto-resume failed on turn %d: %s", turn_num, err)
+                # Only auto-advance if there are active tasks (employees working).
+                # When idle (no active tasks), advancing just burns payroll with
+                # zero productivity — let the agent keep planning instead.
+                with db_factory() as db:
+                    idle_snapshot = _snapshot_state(db, company_id)
+                has_active = idle_snapshot["active_tasks"] > 0
+                if has_active:
+                    logger.info(
+                        "Turn %d: %d consecutive turns without sim resume; auto-advancing.",
+                        turn_num, turns_since_resume,
+                    )
+                    resume_payload, err = _auto_resume(command_executor)
+                    if err:
+                        logger.warning("Auto-resume failed on turn %d: %s", turn_num, err)
+                    else:
+                        turns_since_resume = 0
                 else:
-                    turns_since_resume = 0
+                    logger.info(
+                        "Turn %d: %d turns without resume but no active tasks; skipping auto-advance.",
+                        turn_num, turns_since_resume,
+                    )
 
         if resume_payload is not None:
             # Query full state so the agent sees active/planned task counts

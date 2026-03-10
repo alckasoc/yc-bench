@@ -98,8 +98,9 @@ def handle_task_complete(db: Session, event: SimEvent, sim_time) -> TaskComplete
                         EmployeeSkillRate.domain == domain,
                     ).one_or_none()
                     if skill is not None:
+                        boost = skill.rate_domain_per_hour * task.skill_boost_pct
                         skill.rate_domain_per_hour = min(
-                            skill.rate_domain_per_hour + task.skill_boost_pct,
+                            skill.rate_domain_per_hour + boost,
                             Decimal(str(wc.skill_rate_max)),
                         )
 

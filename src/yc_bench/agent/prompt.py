@@ -42,8 +42,8 @@ Your goal is to maximize company prestige and funds over the simulation horizon 
 
 ## Strategy Guidelines
 
-1. **Check company status first** to understand your financial position and runway.
-2. **Browse the market** for tasks you can accept (check prestige requirements).
+1. **Check company status first** to understand your financial position, runway, and **current prestige levels per domain**.
+2. **Browse the market at your prestige level** — use `--required-prestige-lte N` where N matches your highest prestige. Higher-prestige tasks pay significantly more (prestige-5 tasks pay ~2.2x more than prestige-1). As your prestige grows, ALWAYS increase your browse filter to find better-paying tasks.
 3. **Accept tasks** that match your capabilities and offer good reward-to-risk ratio.
 4. **Assign employees strategically** — employees split throughput across active tasks. Focus employees on fewer tasks for faster completion.
 5. **Dispatch tasks** once assigned, then continue monitoring progress/events via status and reports.
@@ -51,6 +51,7 @@ Your goal is to maximize company prestige and funds over the simulation horizon 
 7. **Watch payroll** — monthly salaries are deducted automatically. Don't let runway drop to zero.
 8. **Use status checks** to track critical milestones and risks.
 9. **Successful tasks** award funds + prestige + employee skill boosts. Build momentum.
+10. **Scale up over time** — regularly check `yc-bench company status` to see your prestige. Browse higher-prestige tasks as you grow — staying on prestige-1 tasks when you have prestige 5+ leaves enormous revenue on the table.
 
 ## Key Rules
 
@@ -199,12 +200,13 @@ def build_initial_user_prompt(
         "",
         "**Your immediate priority**: generate revenue before payroll drains your runway.",
         "You MUST complete these steps now (multiple commands per turn are fine):",
-        "1. `yc-bench market browse --required-prestige-lte 1` — find tasks you can accept",
-        "2. `yc-bench task accept --task-id <UUID>` — accept 2-3 suitable tasks",
-        "3. `yc-bench employee list` — get employee IDs",
-        "4. `yc-bench task assign --task-id <UUID> --employee-id <UUID>` — assign employees",
-        "5. `yc-bench task dispatch --task-id <UUID>` — start work on each assigned task",
-        "6. `yc-bench sim resume` — advance time to collect the first task completion event",
+        "1. `yc-bench company status` — check your current prestige levels",
+        "2. `yc-bench market browse` — find tasks you can accept (use `--required-prestige-lte N` matching your prestige)",
+        "3. `yc-bench task accept --task-id <UUID>` — accept 2-3 suitable tasks",
+        "4. `yc-bench employee list` — get employee IDs",
+        "5. `yc-bench task assign --task-id <UUID> --employee-id <UUID>` — assign employees",
+        "6. `yc-bench task dispatch --task-id <UUID>` — start work on each assigned task",
+        "7. `yc-bench sim resume` — advance time to collect the first task completion event",
         "",
         "Do not spend multiple turns just browsing. Accept and dispatch tasks immediately.",
     ]

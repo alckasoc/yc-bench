@@ -28,8 +28,16 @@ The benchmark uses SQLAlchemy's declarative ORM over SQLite for several reasons:
        │                         │
        ├────<┌──────────┐────────┘
        │     │   Task   │────<┌─────────────────┐
-       │     └──────────┘     │ TaskRequirement  │  (1 per domain × task)
-       │                      └─────────────────┘
+       │     └────┬─────┘     │ TaskRequirement  │  (1 per domain × task)
+       │          │           └─────────────────┘
+       │          │
+       │          └────>┌──────────┐
+       │                │  Client  │  (task issuer with hidden multiplier)
+       │                └────┬─────┘
+       │                     │
+       ├────<┌───────────────┘
+       │     │  ClientTrust  │  (company ↔ client trust level)
+       │     └──────────────┘
        │
        ├────<┌──────────────┐
        │     │  SimEvent    │  (discrete events queue)
@@ -131,6 +139,28 @@ The benchmark uses SQLAlchemy's declarative ORM over SQLite for several reasons:
 | `assigned_at` | DateTime | When assigned |
 
 **Design choice**: Many-to-many junction table. An employee can work on multiple tasks (throughput splits), and a task can have multiple employees (parallel progress).
+
+### Client (`models/client.py`)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID (PK) | Auto-generated |
+| `name` | String(255) | Client company name (e.g. "Nexus AI") |
+| `reward_multiplier` | Float | Hidden per-client bonus [0.7, 2.5], not shown to agent |
+| `tier` | String(32) | Agent-visible label: Standard / Premium / Enterprise |
+| `specialty_domains` | JSON | List of 1-2 domain strings (e.g. ["research", "training"]) |
+
+**Design choice**: The `reward_multiplier` is hidden from the agent; only `tier` is visible. This prevents trivially optimal strategy (always pick highest multiplier) and requires the agent to experiment and observe payouts.
+
+### ClientTrust (`models/client.py`)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `company_id` | UUID (FK, PK) | References Company |
+| `client_id` | UUID (FK, PK) | References Client |
+| `trust_level` | Numeric(6,3) | Range [0.0, 5.0], default 0.000 |
+
+**Design choice**: Composite primary key (company_id, client_id) — one trust level per company-client pair. Trust affects both reward scaling and work reduction. See [11_client_trust.md](11_client_trust.md) for full mechanics.
 
 ### SimEvent (`models/event.py`)
 

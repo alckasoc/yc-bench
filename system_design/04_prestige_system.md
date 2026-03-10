@@ -121,3 +121,14 @@ The prestige system creates several key strategic tensions:
 4. **Accept vs. Defer**: Taking a task you might fail risks prestige loss; waiting risks decay
 
 These tensions make the benchmark more than just "do tasks fast" -- it tests genuine strategic reasoning.
+
+## Interaction with Client Trust
+
+Prestige and trust are complementary progression axes:
+
+- **Prestige** gates which tasks you *can access* (required_prestige per domain)
+- **Trust** determines how *profitable* those tasks are (reward scaling + work reduction)
+- **Client specialties** bridge the two: clients with specialties in your high-prestige domains offer tasks you can complete quickly, building trust faster
+- **Domain alignment** creates a strategic lever: picking clients whose specialties match your prestige strengths compounds both progression axes
+
+See [11_client_trust.md](11_client_trust.md) for full trust mechanics.

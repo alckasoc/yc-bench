@@ -101,6 +101,40 @@ def sim_resume():
             error_output("No simulation found. Run `yc-bench sim init` first.")
         company = db.query(Company).filter(Company.id == sim_state.company_id).one()
 
+        # Block sim resume when no active tasks — advancing idle burns payroll
+        from sqlalchemy import func
+        from ..db.models.task import Task, TaskStatus
+        active_count = db.query(func.count(Task.id)).filter(
+            Task.company_id == sim_state.company_id,
+            Task.status == TaskStatus.ACTIVE,
+        ).scalar() or 0
+
+        if active_count == 0:
+            planned_count = db.query(func.count(Task.id)).filter(
+                Task.company_id == sim_state.company_id,
+                Task.status == TaskStatus.PLANNED,
+            ).scalar() or 0
+            if planned_count > 0:
+                json_output({
+                    "ok": False,
+                    "error": "BLOCKED: You have planned tasks but none are dispatched (active). "
+                             "Assign employees and run `yc-bench task dispatch --task-id <UUID>` "
+                             "before calling sim resume. Advancing time now would waste runway.",
+                    "active_tasks": 0,
+                    "planned_tasks": planned_count,
+                })
+                return
+            else:
+                json_output({
+                    "ok": False,
+                    "error": "BLOCKED: No active tasks. Advancing time with no work in progress "
+                             "just burns payroll. Accept a task, assign employees, dispatch it, "
+                             "THEN call sim resume.",
+                    "active_tasks": 0,
+                    "planned_tasks": 0,
+                })
+                return
+
         next_event = fetch_next_event(
             db=db,
             company_id=sim_state.company_id,
