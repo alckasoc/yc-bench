@@ -55,6 +55,41 @@ def _funds_formatter():
     return plt.FuncFormatter(lambda x, _: f"${x/1000:.0f}K" if abs(x) < 1_000_000 else f"${x/1_000_000:.1f}M")
 
 
+def _smooth_funds(times, funds, window_days=3):
+    """Resample funds to daily frequency and apply rolling average to smooth payroll staircases."""
+    if len(times) < 3:
+        return times, funds
+
+    from datetime import timedelta
+
+    # Create daily time series via forward-fill
+    start, end = times[0], times[-1]
+    n_days = (end - start).days
+    if n_days < 2:
+        return times, funds
+
+    daily_times = [start + timedelta(days=d) for d in range(n_days + 1)]
+    daily_funds = []
+    src_idx = 0
+    for dt in daily_times:
+        while src_idx < len(times) - 1 and times[src_idx + 1] <= dt:
+            src_idx += 1
+        daily_funds.append(funds[src_idx])
+
+    # Rolling average
+    window = min(window_days, len(daily_funds))
+    if window < 2:
+        return daily_times, daily_funds
+
+    smoothed = []
+    for i in range(len(daily_funds)):
+        lo = max(0, i - window // 2)
+        hi = min(len(daily_funds), i + window // 2 + 1)
+        smoothed.append(sum(daily_funds[lo:hi]) / (hi - lo))
+
+    return daily_times, smoothed
+
+
 # ---------------------------------------------------------------------------
 # Data extraction
 # ---------------------------------------------------------------------------
@@ -133,18 +168,39 @@ def parse_prestige_curves(result):
     return by_domain
 
 
+def parse_trust_curves(result):
+    """Extract per-client trust curves from time_series.client_trust.
+
+    Returns dict[client_name] -> (times, levels).
+    """
+    ts = result.get("time_series", {}).get("client_trust", [])
+    if not ts:
+        return {}
+
+    by_client = {}
+    for p in ts:
+        name = p["client_name"]
+        by_client.setdefault(name, ([], []))
+        by_client[name][0].append(datetime.fromisoformat(p["time"]))
+        by_client[name][1].append(p["trust_level"])
+
+    return by_client
+
+
 # ---------------------------------------------------------------------------
 # Plot functions
 # ---------------------------------------------------------------------------
 
-def make_label(result):
+def make_label(result, override=None):
+    if override:
+        return override
     model = result.get("model", "unknown")
     short = model.split("/")[-1]
     seed = result.get("seed", "?")
     return f"{short} (seed {seed})"
 
 
-def plot_funds(ax, results_data):
+def plot_funds(ax, results_data, labels=None, smooth=True):
     """Plot net worth over time on the given axes."""
     ax.axhline(0, color="#e74c3c", linewidth=0.9, linestyle="--", alpha=0.4)
 
@@ -154,8 +210,11 @@ def plot_funds(ax, results_data):
             print(f"No funds data in {fpath}")
             continue
 
+        if smooth:
+            times, funds = _smooth_funds(times, funds)
+
         color = LINE_COLORS[i % len(LINE_COLORS)]
-        label = make_label(result)
+        label = make_label(result, labels[i] if labels and i < len(labels) else None)
         ax.plot(times, funds, color=color, linewidth=2, alpha=0.95, label=label)
 
         terminal = result.get("terminal_reason", "")
@@ -186,7 +245,7 @@ def plot_funds(ax, results_data):
                   labelcolor="white", loc="best")
 
 
-def plot_prestige(ax, results_data):
+def plot_prestige(ax, results_data, labels=None):
     """Plot prestige per domain over time."""
     for i, (fpath, result) in enumerate(results_data):
         curves = parse_prestige_curves(result)
@@ -194,7 +253,7 @@ def plot_prestige(ax, results_data):
             print(f"No prestige data in {fpath}")
             continue
 
-        label_prefix = make_label(result) + " " if len(results_data) > 1 else ""
+        label_prefix = make_label(result, labels[i] if labels and i < len(labels) else None) + " " if len(results_data) > 1 else ""
         for domain, (times, levels) in sorted(curves.items()):
             color = DOMAIN_COLORS.get(domain, LINE_COLORS[i % len(LINE_COLORS)])
             ax.plot(times, levels, color=color, linewidth=2, alpha=0.9,
@@ -208,6 +267,29 @@ def plot_prestige(ax, results_data):
               labelcolor="white", loc="best")
 
 
+def plot_trust(ax, results_data, labels=None):
+    """Plot client trust over time."""
+    for i, (fpath, result) in enumerate(results_data):
+        curves = parse_trust_curves(result)
+        if not curves:
+            print(f"No client trust data in {fpath}")
+            continue
+
+        label_prefix = make_label(result, labels[i] if labels and i < len(labels) else None) + " " if len(results_data) > 1 else ""
+        for j, (client_name, (times, levels)) in enumerate(sorted(curves.items())):
+            color = LINE_COLORS[j % len(LINE_COLORS)]
+            ax.plot(times, levels, color=color, linewidth=2, alpha=0.9,
+                    label=f"{label_prefix}{client_name}", marker="o", markersize=3)
+
+    ax.set_ylim(-0.1, 5.1)
+    _format_time_axis(ax)
+    ax.set_title("Client Trust Over Time", color="white", fontsize=12, pad=10)
+    ax.set_ylabel("Trust Level", color=TEXT_COLOR, fontsize=9)
+    ax.grid(axis="y", color=GRID_COLOR, linewidth=0.5, linestyle="--")
+    ax.legend(fontsize=7, facecolor=FACE_COLOR, edgecolor=GRID_COLOR,
+              labelcolor="white", loc="best", ncol=2)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -216,8 +298,12 @@ def parse_args():
     p = argparse.ArgumentParser(description="Plot benchmark results from JSON files")
     p.add_argument("files", nargs="+", help="JSON result file paths")
     p.add_argument("--out", default=None, help="Output PNG path (default: auto-generated in plots/)")
-    p.add_argument("--plot", default="funds", choices=["funds", "prestige"],
+    p.add_argument("--plot", default="funds", choices=["funds", "prestige", "trust"],
                    help="Plot mode (default: funds)")
+    p.add_argument("--labels", nargs="+", default=None,
+                   help="Custom legend labels (one per file, in order)")
+    p.add_argument("--smooth", action="store_true", default=False,
+                   help="Enable 3-day rolling average smoothing on funds plot")
     return p.parse_args()
 
 
@@ -230,13 +316,27 @@ def main():
         with open(fpath) as f:
             results_data.append((fpath, json.load(f)))
 
-    fig, ax = plt.subplots(figsize=(12, 5), facecolor=BG_COLOR)
-    _style_ax(ax)
+    # Prestige with multiple runs: use side-by-side subplots
+    if args.plot == "prestige" and len(results_data) > 1:
+        fig, axes = plt.subplots(1, len(results_data), figsize=(6 * len(results_data), 5),
+                                 facecolor=BG_COLOR, sharey=True)
+        if len(results_data) == 1:
+            axes = [axes]
+        for idx, (ax_i, (fpath, result)) in enumerate(zip(axes, results_data)):
+            _style_ax(ax_i)
+            lbl = args.labels[idx] if args.labels and idx < len(args.labels) else make_label(result)
+            plot_prestige(ax_i, [(fpath, result)], labels=[lbl])
+            ax_i.set_title(f"Prestige — {lbl}", color="white", fontsize=11, pad=10)
+    else:
+        fig, ax = plt.subplots(figsize=(12, 5), facecolor=BG_COLOR)
+        _style_ax(ax)
 
-    if args.plot == "funds":
-        plot_funds(ax, results_data)
-    elif args.plot == "prestige":
-        plot_prestige(ax, results_data)
+        if args.plot == "funds":
+            plot_funds(ax, results_data, labels=args.labels, smooth=args.smooth)
+        elif args.plot == "prestige":
+            plot_prestige(ax, results_data, labels=args.labels)
+        elif args.plot == "trust":
+            plot_trust(ax, results_data, labels=args.labels)
 
     suffix = f"_{args.plot}" if args.plot != "funds" else ""
 

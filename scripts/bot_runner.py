@@ -40,15 +40,15 @@ from yc_bench.services.generate_tasks import generate_replacement_task
 from yc_bench.services.rng import RngStreams
 from yc_bench.services.seed_world import SeedWorldRequest, seed_world_transactional
 
+# Bot throughput cap: the bot has zero overhead per task (no API calls, no
+# thinking) so it can complete ~3000 tasks/year.  Real LLMs average ~4.5–5.2
+# No artificial task cap. The bot is subject to the same economic dynamics
+# as the LLM: salary bumps, trust system, and payroll naturally limit
+# throughput and profitability.
+
 CONFIGS = ["medium", "hard", "nightmare"]
 SEEDS = [1, 2, 3]
 
-# Cap task cycles to match LLM throughput.  An LLM gets 500 turns and needs
-# ~5 turns per task cycle (browse + accept + 5× assign + dispatch + resume),
-# so it can complete at most ~100 tasks.  The sim still runs to horizon —
-# once the budget is exhausted the bot just advances time (paying salaries,
-# bleeding cash) exactly like an LLM that hit max_turns.
-MAX_TASK_CYCLES = 100
 
 
 @dataclass
@@ -91,16 +91,48 @@ def _compute_deadline(accepted_at, max_domain_qty, cfg):
 
 
 def _build_candidates(db, company_id, sim_state, world_cfg, emp_skills):
-    """Build CandidateTask list for all market tasks the company can accept (per-domain prestige gating)."""
+    """Build CandidateTask list from the same limited market window the LLM sees.
+
+    Mirrors the LLM's constraints:
+    - Only sees `market_browse_default_limit` tasks (default 50), not the full market
+    - Respects prestige requirements (per-domain gating)
+    - Respects trust requirements (can't accept tasks above current trust level)
+    """
+    from yc_bench.db.models.client import ClientTrust
+
     prestige_rows = db.query(CompanyPrestige).filter(
         CompanyPrestige.company_id == company_id
     ).all()
     prestige_map = {p.domain: float(p.prestige_level) for p in prestige_rows}
     min_prestige = min(prestige_map.values()) if prestige_map else 1.0
 
-    market_tasks = db.query(Task).filter(
-        Task.status == TaskStatus.MARKET,
-    ).order_by(Task.reward_funds_cents.desc()).all()
+    # Build trust map for trust requirement checks
+    trust_rows = db.query(ClientTrust).filter(
+        ClientTrust.company_id == company_id
+    ).all()
+    trust_map = {str(ct.client_id): float(ct.trust_level) for ct in trust_rows}
+
+    # Same limited view as LLM's `market browse` — paginate in chunks like
+    # an LLM would (browse, check, offset to next page if nothing good).
+    browse_limit = world_cfg.market_browse_default_limit  # default: 50
+    total_market = db.query(Task).filter(Task.status == TaskStatus.MARKET).count()
+    market_tasks = []
+    for page_offset in range(0, total_market, browse_limit):
+        page = (
+            db.query(Task)
+            .filter(Task.status == TaskStatus.MARKET)
+            .order_by(Task.reward_funds_cents.desc())
+            .offset(page_offset)
+            .limit(browse_limit)
+            .all()
+        )
+        market_tasks.extend(page)
+        # Stop paginating once we have enough accessible tasks (greedy LLM
+        # would stop browsing once it finds good options)
+        accessible = [t for t in page if t.required_trust == 0 or
+                      trust_map.get(str(t.client_id), 0.0) >= t.required_trust]
+        if accessible:
+            break
 
     all_skills = [{d: r for d, r in e["skills"].items()} for e in emp_skills]
 
@@ -117,6 +149,12 @@ def _build_candidates(db, company_id, sim_state, world_cfg, emp_skills):
         )
         if not meets_prestige:
             continue
+
+        # Trust requirement check (same validation as CLI task accept)
+        if task.required_trust > 0 and task.client_id is not None:
+            client_trust = trust_map.get(str(task.client_id), 0.0)
+            if client_trust < task.required_trust:
+                continue
 
         max_domain_qty = max(float(r.required_qty) for r in reqs)
         task_reqs = [{"domain": r.domain, "required_qty": float(r.required_qty)} for r in reqs]
@@ -284,19 +322,6 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
                     break
                 continue
 
-            # No active task — if we've used up our task budget, just
-            # advance time (pay salaries, bleed cash) like an LLM that
-            # hit max_turns would.
-            if task_cycles_used >= MAX_TASK_CYCLES:
-                next_event = fetch_next_event(db, company_id, sim_state.horizon_end)
-                if next_event is None:
-                    adv = advance_time(db, company_id, sim_state.horizon_end)
-                    break
-                adv = advance_time(db, company_id, next_event.scheduled_at)
-                if adv.bankrupt or adv.horizon_reached:
-                    break
-                continue
-
             # Get employees and build candidates
             employees = db.query(Employee).filter(Employee.company_id == company_id).all()
             emp_skills = []
@@ -333,6 +358,29 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
             reqs = db.query(TaskRequirement).filter(
                 TaskRequirement.task_id == best_task.id
             ).all()
+
+            # Apply trust reward multiplier and work reduction (same formula as CLI task accept)
+            if best_task.client_id is not None:
+                from yc_bench.db.models.client import Client, ClientTrust
+                client_row = db.query(Client).filter(Client.id == best_task.client_id).one_or_none()
+                client_multiplier = client_row.reward_multiplier if client_row else 1.0
+                ct = db.query(ClientTrust).filter(
+                    ClientTrust.company_id == company_id,
+                    ClientTrust.client_id == best_task.client_id,
+                ).one_or_none()
+                trust_level = float(ct.trust_level) if ct else 0.0
+                # Reward multiplier
+                trust_multiplier = (
+                    world_cfg.trust_base_multiplier
+                    + (client_multiplier ** 2) * world_cfg.trust_reward_scale
+                    * (trust_level ** 2) / world_cfg.trust_max
+                )
+                best_task.reward_funds_cents = int(best_task.reward_funds_cents * trust_multiplier)
+                # Work reduction: trusted clients → less work required
+                work_reduction = world_cfg.trust_work_reduction_max * (trust_level / world_cfg.trust_max)
+                for r in reqs:
+                    r.required_qty = int(float(r.required_qty) * (1 - work_reduction))
+
             max_domain_qty = max(float(r.required_qty) for r in reqs)
 
             best_task.status = TaskStatus.PLANNED
@@ -340,18 +388,43 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
             best_task.accepted_at = sim_state.sim_time
             best_task.deadline = _compute_deadline(sim_state.sim_time, max_domain_qty, world_cfg)
 
-            # Generate replacement
+            # Generate replacement (same logic as CLI task accept)
             counter = sim_state.replenish_counter
             sim_state.replenish_counter = counter + 1
+
+            from yc_bench.db.models.client import Client as ClientModel
+            replaced_client_index = 0
+            if best_task.client_id is not None:
+                clients = db.query(ClientModel).order_by(ClientModel.name).all()
+                for i, c in enumerate(clients):
+                    if c.id == best_task.client_id:
+                        replaced_client_index = i
+                        break
+
+            # Get specialty domains for the replacement client
+            replacement_spec_domains = None
+            if best_task.client_id is not None:
+                orig_client = db.query(ClientModel).filter(ClientModel.id == best_task.client_id).one_or_none()
+                if orig_client:
+                    replacement_spec_domains = orig_client.specialty_domains
+
             replacement = generate_replacement_task(
                 run_seed=sim_state.run_seed,
                 replenish_counter=counter,
                 replaced_prestige=best_task.required_prestige,
+                replaced_client_index=replaced_client_index,
                 cfg=world_cfg,
+                specialty_domains=replacement_spec_domains,
             )
+
+            clients = db.query(ClientModel).order_by(ClientModel.name).all()
+            replacement_client = clients[replacement.client_index % len(clients)] if clients else None
+            replacement_client_id = replacement_client.id if replacement_client else None
+
             replacement_row = Task(
                 id=uuid4(),
                 company_id=None,
+                client_id=replacement_client_id,
                 status=TaskStatus.MARKET,
                 title=replacement.title,
                 required_prestige=replacement.required_prestige,
@@ -360,6 +433,7 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
                 skill_boost_pct=replacement.skill_boost_pct,
                 accepted_at=None, deadline=None, completed_at=None,
                 success=None, progress_milestone_pct=0,
+                required_trust=replacement.required_trust,
             )
             db.add(replacement_row)
             for domain, qty in replacement.requirements.items():
@@ -388,7 +462,11 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
 
             task_cycles_used += 1
 
-    # Final state
+
+    # Final state + extract time series for plotting
+    from yc_bench.runner.extract import extract_time_series
+    import json
+
     with session_scope(factory) as db:
         company = db.query(Company).filter(Company.id == company_id).one()
         sim_state = db.query(SimState).first()
@@ -401,6 +479,27 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
         ).all()
         max_p = max((float(p.prestige_level) for p in prestige_rows), default=1.0)
 
+    time_series = extract_time_series(lambda: session_scope(factory), company_id)
+
+    # Write result JSON (same format as LLM runner for plot compatibility)
+    result_json = {
+        "session_id": f"bot-{seed}-{bot_slug}",
+        "model": bot_slug,
+        "seed": seed,
+        "horizon_years": cfg.sim.horizon_years,
+        "turns_completed": turn,
+        "terminal": True,
+        "terminal_reason": "bankrupt" if bankrupt else "horizon_end",
+        "terminal_detail": "bankrupt" if bankrupt else "horizon_end",
+        "total_cost_usd": 0,
+        "time_series": time_series,
+    }
+    results_dir = Path("results")
+    results_dir.mkdir(exist_ok=True)
+    result_path = results_dir / f"yc_bench_result_{config_name}_{seed}_{bot_slug}.json"
+    with open(result_path, "w") as f:
+        json.dump(result_json, f, indent=2)
+
     return {
         "config": config_name,
         "seed": seed,
@@ -411,6 +510,7 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
         "tasks_completed": tasks_completed,
         "tasks_failed": tasks_failed,
         "max_prestige": max_p,
+        "result_path": str(result_path),
     }
 
 

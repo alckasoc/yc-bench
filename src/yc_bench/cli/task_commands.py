@@ -90,15 +90,26 @@ def task_accept(
                     f"does not meet task requirement ({task.required_trust})."
                 )
 
+        # Apply trust reward multiplier and work reduction at accept time
+        _cfg = _get_world_cfg()
+        if task.client_id is not None:
+            client_row = db.query(Client).filter(Client.id == task.client_id).one_or_none()
+            client_multiplier = client_row.reward_multiplier if client_row else 1.0
+            # Reward: continuous formula
+            trust_multiplier = (
+                _cfg.trust_base_multiplier
+                + (client_multiplier ** 2) * _cfg.trust_reward_scale
+                * (trust_level ** 2) / _cfg.trust_max
+            )
+            task.reward_funds_cents = int(task.reward_funds_cents * trust_multiplier)
+            # Work reduction: trusted clients give clearer specs → less work
+            work_reduction = _cfg.trust_work_reduction_max * (trust_level / _cfg.trust_max)
+            for r in reqs:
+                r.required_qty = int(float(r.required_qty) * (1 - work_reduction))
+
         max_domain_qty = max(float(r.required_qty) for r in reqs)
         accepted_at = sim_state.sim_time
         deadline = _compute_deadline(accepted_at, max_domain_qty)
-
-        # Apply trust reward bonus at accept time
-        _cfg = _get_world_cfg()
-        if trust_level > 0 and task.client_id is not None:
-            reward_multiplier = 1 + _cfg.trust_reward_scale * trust_level
-            task.reward_funds_cents = int(task.reward_funds_cents * reward_multiplier)
 
         # Transition task
         task.status = TaskStatus.PLANNED
@@ -119,17 +130,26 @@ def task_accept(
                     replaced_client_index = i
                     break
 
+        # Get specialty domains for the replacement client
+        replacement_spec_domains = None
+        if task.client_id is not None:
+            orig_client = db.query(Client).filter(Client.id == task.client_id).one_or_none()
+            if orig_client:
+                replacement_spec_domains = orig_client.specialty_domains
+
         replacement = generate_replacement_task(
             run_seed=sim_state.run_seed,
             replenish_counter=counter,
             replaced_prestige=task.required_prestige,
             replaced_client_index=replaced_client_index,
             cfg=_get_world_cfg(),
+            specialty_domains=replacement_spec_domains,
         )
 
         # Look up the actual client for the replacement
         clients = db.query(Client).order_by(Client.name).all()
-        replacement_client_id = clients[replacement.client_index % len(clients)].id if clients else None
+        replacement_client = clients[replacement.client_index % len(clients)] if clients else None
+        replacement_client_id = replacement_client.id if replacement_client else None
 
         replacement_row = Task(
             id=uuid4(),

@@ -86,7 +86,8 @@ def _seed_clients(db, company, req):
     generated = generate_clients(run_seed=req.run_seed, count=req.cfg.num_clients)
     clients = []
     for gc in generated:
-        client = Client(id=uuid4(), name=gc.name)
+        client = Client(id=uuid4(), name=gc.name, reward_multiplier=gc.reward_multiplier,
+                       tier=gc.tier, specialty_domains=gc.specialty_domains)
         db.add(client)
         clients.append(client)
         db.add(ClientTrust(
@@ -99,7 +100,10 @@ def _seed_clients(db, company, req):
 
 
 def _seed_market_tasks(db, company, req, clients):
-    generated = generate_tasks(run_seed=req.run_seed, count=req.market_task_count, cfg=req.cfg)
+    # Build specialty list indexed by client order for domain-biased task generation
+    client_specialties = [c.specialty_domains or [] for c in clients] if clients else None
+    generated = generate_tasks(run_seed=req.run_seed, count=req.market_task_count, cfg=req.cfg,
+                               client_specialties=client_specialties)
     for task in generated:
         client = clients[task.client_index % len(clients)] if clients else None
         task_row = Task(

@@ -119,6 +119,8 @@ class WorldConfig(BaseModel):
 
     # --- Salary bump on task completion ---
     salary_bump_pct: float = 0.01    # 1% raise per assigned employee per completed task
+    salary_max_cents: int = 10_000_000  # cap individual salary at $100K/month
+    skill_rate_max: float = 30.0  # cap employee skill rate (prevents exponential skill compounding)
 
     # --- Prestige mechanics ---
     prestige_max: float = 10.0
@@ -138,13 +140,15 @@ class WorldConfig(BaseModel):
     num_clients: int = 8
     trust_max: float = 5.0
     trust_min: float = 0.0
-    trust_gain_base: float = 0.15
+    trust_gain_base: float = 0.40
     trust_gain_diminishing_power: float = 1.5
     trust_fail_penalty: float = 0.3
     trust_cancel_penalty: float = 0.5
-    trust_decay_per_day: float = 0.02
-    trust_reward_scale: float = 0.15      # reward × (1 + scale × trust)
-    trust_exclusive_task_fraction: float = 0.20  # 20% of tasks require trust > 0
+    trust_decay_per_day: float = 0.015
+    trust_cross_client_decay: float = 0.03  # completing work for Client A erodes trust with other clients
+    trust_base_multiplier: float = 0.50   # all clients start at 50% of listed reward
+    trust_reward_scale: float = 0.25      # reward = listed × (base + client_mult² × scale × trust²/trust_max)
+    trust_work_reduction_max: float = 0.40  # trusted clients give clearer specs → up to 40% less work at max trust
 
     # Required qty scaling by prestige: qty *= 1 + prestige_qty_scale * (prestige - 1).
     # At 0.3: prestige-5 tasks need 2.2× the work of prestige-1 tasks.

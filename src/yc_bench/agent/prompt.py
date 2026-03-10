@@ -64,12 +64,31 @@ Your goal is to maximize company prestige and funds over the simulation horizon 
 ## Client Trust
 
 - Each task is offered by a specific **client** (e.g. "Nexus AI", "Vertex Labs").
+- Trust affects TWO things: **reward** and **work required**.
+
+### Client Tiers and Specialties
+- Clients are classified into **tiers**: Standard, Premium, Enterprise. Higher tiers have higher reward potential at high trust.
+- Each client has **specialty domains** (e.g. "research", "training"). Tasks from a client are biased toward their specialties — a client specializing in "research" will mostly offer research-heavy tasks.
+- Use `yc-bench client list` to see each client's tier, specialties, and current trust level.
+
+### Reward Scaling
+- Listed rewards are **potential** — actual payout depends on trust. Without trust, you only receive about **50%** of the listed reward.
+- As trust grows, payouts increase significantly. Higher-tier clients scale better but start worse.
+- Observe actual payouts over time to gauge each client's true value.
+
+### Work Reduction
+- **Trusted clients give clearer specs** — work required shrinks with trust (up to 40% reduction at max trust).
+- This compounds with higher rewards: at high trust, you earn more in less time.
+
+### Strategy
+- **Domain alignment matters most**: Pick clients whose specialties match your company's prestige strengths. A Premium client aligned with your best domains may outperform an Enterprise client where you're weak.
+- **Focus on 2-3 clients** to build trust fast. Scattered work = perpetual low payouts + full work load.
+- **Compounding loop**: trust → less work → faster completion → more tasks per month → more trust → even better returns.
+- **Higher-tier clients are riskier early**: they pay less than Standard clients at low trust, but become very rewarding at high trust. Standard clients are safer to start with.
 - Completing tasks for a client builds **trust** [0.0–5.0]. Trust gains diminish as you approach max.
-- Higher trust = higher pay: reward multiplier = 1 + 0.15 × trust_level (applied at accept time).
-- Some tasks require minimum trust level (`required_trust > 0`). These pay ~1.3x more.
+- **Premium tasks require trust**: High-reward tasks require established trust (required_trust 1-4). Clients don't give their best projects to unproven vendors.
 - **Trust decays** daily — relationships need maintenance through continued work.
 - **Failures hurt**: -0.3 trust. **Cancellations hurt more**: -0.5 trust.
-- Use `yc-bench client list` to monitor trust levels across all clients.
 """
 
 

@@ -20,6 +20,7 @@ def extract_time_series(db_factory, company_id: UUID) -> Dict[str, Any]:
         "tasks": tasks,
         "ledger": ledger,
         "client_trust": client_trust,
+        "trust_reward_formula": "continuous: reward = listed × (0.50 + client_mult² × 0.25 × trust²/5.0); work_reduction = 0.40 × trust/5.0; cross_client_decay = 0.03/task; tiers: Standard=[0.7,1.0), Premium=[1.0,1.7), Enterprise=[1.7,2.5]; specialty_bias=0.70",
     }
 
 
@@ -83,111 +84,180 @@ def _extract_funds(db, company_id: UUID) -> List[Dict[str, Any]]:
 
 
 def _extract_prestige(db, company_id: UUID) -> List[Dict[str, Any]]:
-    """Reconstruct prestige history from final prestige and completed task rewards.
+    """Reconstruct prestige history by walking forward from initial prestige.
 
-    Works backward: final prestige minus task rewards gives us history points.
+    Applies task deltas (success/fail) and prestige decay between events.
     """
-    from decimal import Decimal
-
     from ..db.models.company import CompanyPrestige
     from ..db.models.task import Task, TaskRequirement, TaskStatus
+    from ..config import get_world_config
 
-    # Get final prestige levels per domain
+    wc = get_world_config()
+
     prestige_rows = (
         db.query(CompanyPrestige)
         .filter(CompanyPrestige.company_id == company_id)
         .all()
     )
-    final_prestige = {
-        p.domain.value if hasattr(p.domain, "value") else str(p.domain): float(p.prestige_level)
-        for p in prestige_rows
-    }
+    if not prestige_rows:
+        return []
 
-    # Get completed tasks with their domains and prestige deltas, ordered by completion time
+    all_domains = sorted(
+        p.domain.value if hasattr(p.domain, "value") else str(p.domain)
+        for p in prestige_rows
+    )
+
+    # Get ALL completed tasks (success and fail) ordered by completion time
     completed_tasks = (
         db.query(Task)
         .filter(
             Task.company_id == company_id,
-            Task.status == TaskStatus.COMPLETED_SUCCESS,
             Task.completed_at.isnot(None),
+            Task.status.in_([TaskStatus.COMPLETED_SUCCESS, TaskStatus.COMPLETED_FAIL]),
         )
         .order_by(Task.completed_at)
         .all()
     )
 
-    # For each completed task, find which domains it touches
+    # Map task -> domains
     task_domain_map: Dict[str, List[str]] = {}
     for t in completed_tasks:
         reqs = db.query(TaskRequirement).filter(TaskRequirement.task_id == t.id).all()
-        domains = [
+        task_domain_map[str(t.id)] = [
             r.domain.value if hasattr(r.domain, "value") else str(r.domain)
             for r in reqs
         ]
-        task_domain_map[str(t.id)] = domains
 
-    # Work backward from final prestige to reconstruct history
-    # Start with final prestige, subtract each task's reward_prestige_delta for its domains
-    domain_running = dict(final_prestige)
-    # Collect events in reverse, then reverse at the end
-    reverse_events = []
+    # Walk forward from initial prestige
+    domain_levels = {d: wc.initial_prestige_level for d in all_domains}
+    last_event_time = None
+    events: List[Dict[str, Any]] = []
 
-    for t in reversed(completed_tasks):
+    # Record initial state at first task time
+    if completed_tasks:
+        first_time = completed_tasks[0].completed_at
+        for domain in all_domains:
+            events.append({
+                "time": first_time.isoformat(),
+                "domain": domain,
+                "level": round(domain_levels[domain], 4),
+            })
+        last_event_time = first_time
+
+    for t in completed_tasks:
+        # Apply decay for ALL domains since last event
+        if last_event_time and t.completed_at > last_event_time:
+            days = (t.completed_at - last_event_time).total_seconds() / 86400
+            decay = wc.prestige_decay_per_day * days
+            for d in all_domains:
+                domain_levels[d] = max(wc.prestige_min, domain_levels[d] - decay)
+
+        # Apply task delta
         domains = task_domain_map.get(str(t.id), [])
         delta = float(t.reward_prestige_delta) if t.reward_prestige_delta else 0.0
+        is_success = (t.status == TaskStatus.COMPLETED_SUCCESS)
+
         for domain in domains:
-            # Record the "after" state at completion time
-            reverse_events.append({
+            if is_success:
+                domain_levels[domain] = min(wc.prestige_max, domain_levels[domain] + delta)
+            else:
+                penalty = wc.penalty_fail_multiplier * delta
+                domain_levels[domain] = max(wc.prestige_min, domain_levels[domain] - penalty)
+
+            events.append({
                 "time": t.completed_at.isoformat(),
                 "domain": domain,
-                "level": round(domain_running.get(domain, 1.0), 4),
-            })
-            # Subtract delta to get "before" state
-            domain_running[domain] = domain_running.get(domain, 1.0) - delta
-
-    # Reverse to get chronological order
-    events = list(reversed(reverse_events))
-
-    # Prepend initial prestige (level 1.0 for all domains) at earliest task time or just as a starting record
-    all_domains = sorted(final_prestige.keys())
-    if completed_tasks:
-        first_time = completed_tasks[0].completed_at.isoformat()
-    elif prestige_rows:
-        # No completed tasks — just record final state
-        first_time = None
-    else:
-        first_time = None
-
-    initial_events = []
-    if first_time:
-        for domain in all_domains:
-            initial_events.append({
-                "time": first_time,
-                "domain": domain,
-                "level": round(domain_running.get(domain, 1.0), 4),
+                "level": round(domain_levels[domain], 4),
             })
 
-    return initial_events + events
+        last_event_time = t.completed_at
+
+    return events
 
 
 def _extract_client_trust(db, company_id: UUID) -> List[Dict[str, Any]]:
-    """Extract current client trust levels."""
-    from ..db.models.client import Client, ClientTrust
+    """Reconstruct client trust time series from task completions and decay.
 
-    rows = (
+    Walks forward through completed/failed tasks, applying trust gains/losses
+    and inter-event decay to reconstruct the full trust curve per client.
+    """
+    from ..db.models.client import Client, ClientTrust
+    from ..db.models.task import Task, TaskStatus
+    from ..config import get_world_config
+
+    wc = get_world_config()
+
+    # Get all clients
+    trust_rows = (
         db.query(ClientTrust, Client.name)
         .join(Client, Client.id == ClientTrust.client_id)
         .filter(ClientTrust.company_id == company_id)
         .order_by(Client.name)
         .all()
     )
-    return [
-        {
-            "client_id": str(ct.client_id),
-            "client_name": name,
-            "trust_level": float(ct.trust_level),
-        }
-        for ct, name in rows
-    ]
+    if not trust_rows:
+        return []
+
+    client_names = {str(ct.client_id): name for ct, name in trust_rows}
+
+    # Get all tasks that affect trust (completed or failed), ordered by completion time
+    tasks = (
+        db.query(Task)
+        .filter(
+            Task.company_id == company_id,
+            Task.client_id.isnot(None),
+            Task.completed_at.isnot(None),
+            Task.status.in_([TaskStatus.COMPLETED_SUCCESS, TaskStatus.COMPLETED_FAIL]),
+        )
+        .order_by(Task.completed_at)
+        .all()
+    )
+
+    # Initialize trust at 0.0 for all clients
+    trust_levels = {str(ct.client_id): 0.0 for ct, _ in trust_rows}
+    last_event_time = None
+
+    points = []
+    # Record initial state at first task time
+    if tasks:
+        first_time = tasks[0].completed_at
+        for cid, name in client_names.items():
+            points.append({
+                "time": first_time.isoformat(),
+                "client_name": name,
+                "trust_level": 0.0,
+            })
+        last_event_time = first_time
+
+    for t in tasks:
+        cid = str(t.client_id)
+        if cid not in trust_levels:
+            continue
+
+        # Apply decay for all clients since last event
+        if last_event_time and t.completed_at > last_event_time:
+            days_elapsed = (t.completed_at - last_event_time).total_seconds() / 86400
+            decay = wc.trust_decay_per_day * days_elapsed
+            for k in trust_levels:
+                trust_levels[k] = max(wc.trust_min, trust_levels[k] - decay)
+
+        # Apply trust change for this task's client
+        if t.status == TaskStatus.COMPLETED_SUCCESS:
+            ratio = trust_levels[cid] / wc.trust_max
+            gain = wc.trust_gain_base * ((1 - ratio) ** wc.trust_gain_diminishing_power)
+            trust_levels[cid] = min(wc.trust_max, trust_levels[cid] + gain)
+        else:
+            trust_levels[cid] = max(wc.trust_min, trust_levels[cid] - wc.trust_fail_penalty)
+
+        # Record state for the affected client
+        points.append({
+            "time": t.completed_at.isoformat(),
+            "client_name": client_names[cid],
+            "trust_level": round(trust_levels[cid], 4),
+        })
+        last_event_time = t.completed_at
+
+    return points
 
 
 def _extract_tasks(db, company_id: UUID) -> List[Dict[str, Any]]:

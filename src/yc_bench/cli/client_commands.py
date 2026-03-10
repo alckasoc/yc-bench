@@ -28,6 +28,8 @@ def client_list():
                 "client_id": str(c.id),
                 "name": c.name,
                 "trust_level": float(ct.trust_level) if ct else 0.0,
+                "tier": c.tier,
+                "specialties": c.specialty_domains or [],
             })
 
         json_output({

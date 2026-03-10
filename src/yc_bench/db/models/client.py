@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric, String, Uuid
+from sqlalchemy import CheckConstraint, Float, ForeignKey, JSON, Numeric, String, Uuid
 from sqlalchemy.orm import mapped_column
 
 from ..base import Base
@@ -20,6 +20,21 @@ class Client(Base):
     name = mapped_column(
         String(255),
         nullable=False,
+    )
+    reward_multiplier = mapped_column(
+        Float,
+        nullable=False,
+        default=1.0,
+    )
+    tier = mapped_column(
+        String(32),
+        nullable=False,
+        default="Standard",
+    )
+    specialty_domains = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
     )
 
 
