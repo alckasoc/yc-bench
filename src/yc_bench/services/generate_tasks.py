@@ -64,10 +64,10 @@ def _sample_required_qty(rng, cfg):
     return int(sample_from_spec(rng, cfg.dist.required_qty))
 
 
-def _sample_domains_with_bias(rng, k, specialty_domains=None):
+def _sample_domains_with_bias(rng, k, specialty_domains=None, specialty_bias=0.7):
     """Sample k domains, biased toward client specialties.
 
-    First domain pick: 70% chance of being a specialty (if specialties exist).
+    First domain pick: specialty_bias chance of being a specialty (if specialties exist).
     Remaining picks: uniform random from remaining domains.
     """
     if not specialty_domains or k <= 0:
@@ -76,9 +76,9 @@ def _sample_domains_with_bias(rng, k, specialty_domains=None):
     picked = []
     available = list(_ALL_DOMAINS)
 
-    # First pick: 70% specialty bias
+    # First pick: specialty bias
     specialty_enums = [d for d in _ALL_DOMAINS if d.value in specialty_domains]
-    if specialty_enums and rng.random() < 0.7:
+    if specialty_enums and rng.random() < specialty_bias:
         first = rng.choice(specialty_enums)
     else:
         first = rng.choice(available)
@@ -95,7 +95,8 @@ def _sample_domains_with_bias(rng, k, specialty_domains=None):
 
 def _sample_requirements(rng, cfg, prestige=1, specialty_domains=None):
     k = _sample_domain_count(rng, cfg)
-    picked_domains = _sample_domains_with_bias(rng, k, specialty_domains=specialty_domains)
+    picked_domains = _sample_domains_with_bias(rng, k, specialty_domains=specialty_domains,
+                                                specialty_bias=cfg.task_specialty_domain_bias)
     scale = 1 + cfg.prestige_qty_scale * (prestige - 1)
     return {domain: int(_sample_required_qty(rng, cfg) * scale) for domain in picked_domains}
 
@@ -116,22 +117,20 @@ def _required_trust_from_reward(rng, cfg, reward_cents):
 
     reward_frac = min(1.0, (reward_cents - reward_floor) / (reward_ceiling - reward_floor))
 
-    # Only premium tasks (top ~30%) require trust. Clients reserve their
-    # best projects for proven vendors; routine work is open to anyone.
-    trust_prob = max(0.0, (reward_frac - 0.6) / 0.4)  # 0 below 60th pct, ramps to 1.0
+    # Only premium tasks (top portion) require trust.
+    trust_prob = max(0.0, (reward_frac - cfg.trust_reward_threshold) / cfg.trust_reward_ramp)
     if rng.random() >= trust_prob:
         return 0
 
-    # Trust level required: 1 at threshold, up to 4 for top tasks
-    return max(1, min(int(1 + reward_frac * 3), 4))
+    # Trust level required: 1 at threshold, up to max for top tasks
+    return max(1, min(int(1 + reward_frac * cfg.trust_level_reward_scale), cfg.trust_level_max_required))
 
 
 def _make_task(rng, cfg, prestige, serial, requirements, client_index=0):
     reward = _sample_reward_funds_cents(rng, cfg, prestige=prestige)
     required_trust = _required_trust_from_reward(rng, cfg, reward)
-    # Trust-gated tasks get a reward boost (premium projects pay more)
     if required_trust > 0:
-        reward = int(reward * (1.0 + 0.15 * required_trust))
+        reward = int(reward * (1.0 + cfg.trust_gated_reward_boost * required_trust))
     return GeneratedTask(
         title=f"Task-{serial}",
         required_prestige=prestige,

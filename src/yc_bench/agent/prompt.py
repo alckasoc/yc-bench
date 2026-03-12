@@ -59,7 +59,7 @@ Your goal is to maximize company prestige and funds over the simulation horizon 
 - Task completion after deadline = failure (0.8x prestige penalty, no reward, trust penalty)
 - Task cancellation = 1.2x prestige penalty per domain + trust penalty (worse than failure)
 - Employee throughput = base_rate / number_of_active_tasks_assigned
-- Time advances only when you run `yc-bench sim resume`
+- Time advances only when you run `yc-bench sim resume`. **Note**: `sim resume` is blocked if you have no active (dispatched) tasks — you must accept, assign, and dispatch at least one task before time can advance.
 - Prestige is clamped [1, 10]. Funds are in cents.
 
 ## Client Trust
@@ -149,13 +149,13 @@ def build_turn_context(
     if active_tasks == 0 and planned_tasks == 0:
         parts.append(
             "\n**ACTION REQUIRED**: No tasks are running. "
-            "Accept a task, assign employees to it, dispatch it, then call `yc-bench sim resume`. "
-            "Do this now — every turn without active tasks burns runway."
+            "`sim resume` is BLOCKED until you have active tasks. "
+            "Accept a task, assign employees to it, and dispatch it now."
         )
     elif planned_tasks > 0 and active_tasks == 0:
         parts.append(
             "\n**ACTION REQUIRED**: You have planned tasks but none are dispatched. "
-            "Assign employees and dispatch now, then call `yc-bench sim resume`."
+            "`sim resume` is BLOCKED until you dispatch. Assign employees and dispatch now."
         )
     else:
         parts.append("\nDecide your next actions. Use `run_command` to execute CLI commands.")

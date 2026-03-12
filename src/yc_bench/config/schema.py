@@ -136,19 +136,44 @@ class WorldConfig(BaseModel):
     # every ~3 months. Floored at prestige_min.
     prestige_decay_per_day: float = 0.005
 
-    # --- Client trust ---
+    # --- Client trust (intuitive knobs) ---
     num_clients: int = 8
     trust_max: float = 5.0
+    # ~how many successful tasks to reach 80% of max trust with one client
+    trust_build_rate: float = 20.0
+    # 0-1: how punishing failures/inactivity are (0=forgiving, 1=harsh)
+    trust_fragility: float = 0.5
+    # 0-1: how much working for one client hurts trust with others (0=none, 1=heavy)
+    trust_focus_pressure: float = 0.5
+    # payout multiplier a typical Premium client (mult≈1.3) gives at max trust
+    trust_reward_ceiling: float = 2.6
+    # max work reduction at max trust (0.4 = 40% less work)
+    trust_work_reduction_max: float = 0.40
+    # fraction of tasks that require trust (~0.2 = 20%)
+    trust_gating_fraction: float = 0.20
+
+    # --- Derived trust params (computed from knobs above, do not set directly) ---
     trust_min: float = 0.0
-    trust_gain_base: float = 0.40
+    trust_gain_base: float = 0.0
     trust_gain_diminishing_power: float = 1.5
-    trust_fail_penalty: float = 0.3
-    trust_cancel_penalty: float = 0.5
-    trust_decay_per_day: float = 0.015
-    trust_cross_client_decay: float = 0.03  # completing work for Client A erodes trust with other clients
-    trust_base_multiplier: float = 0.50   # all clients start at 50% of listed reward
-    trust_reward_scale: float = 0.25      # reward = listed × (base + client_mult² × scale × trust²/trust_max)
-    trust_work_reduction_max: float = 0.40  # trusted clients give clearer specs → up to 40% less work at max trust
+    trust_fail_penalty: float = 0.0
+    trust_cancel_penalty: float = 0.0
+    trust_decay_per_day: float = 0.0
+    trust_cross_client_decay: float = 0.0
+    trust_base_multiplier: float = 0.50
+    trust_reward_scale: float = 0.0
+    trust_reward_threshold: float = 0.0
+    trust_reward_ramp: float = 0.0
+    trust_level_reward_scale: float = 3.0
+    trust_level_max_required: int = 4
+    trust_gated_reward_boost: float = 0.15
+    client_reward_mult_low: float = 0.7
+    client_reward_mult_high: float = 2.5
+    client_reward_mult_mode: float = 1.0
+    client_single_specialty_prob: float = 0.6
+    client_tier_premium_threshold: float = 1.0
+    client_tier_enterprise_threshold: float = 1.7
+    task_specialty_domain_bias: float = 0.7
 
     # Required qty scaling by prestige: qty *= 1 + prestige_qty_scale * (prestige - 1).
     # At 0.3: prestige-5 tasks need 2.2× the work of prestige-1 tasks.
@@ -190,6 +215,45 @@ class WorldConfig(BaseModel):
             rate_min=7.0, rate_max=10.0,
         )
     )
+
+    @model_validator(mode="after")
+    def _derive_trust_params(self) -> WorldConfig:
+        """Derive detailed trust parameters from the intuitive knobs.
+
+        Derivation preserves default behavior: trust_build_rate=20, fragility=0.5,
+        focus_pressure=0.5, reward_ceiling=2.6 produce the same values as the
+        original hardcoded defaults.
+        """
+        # trust_build_rate → gain_base
+        # Approximate: gain_base ≈ trust_max × 1.6 / build_rate
+        # At default (20): 5.0 × 1.6 / 20 = 0.40
+        self.trust_gain_base = self.trust_max * 1.6 / self.trust_build_rate
+
+        # trust_fragility → fail_penalty, cancel_penalty, decay_per_day
+        # At 0.5: fail=0.3, cancel=0.5, decay=0.015
+        self.trust_fail_penalty = self.trust_fragility * 0.6
+        self.trust_cancel_penalty = self.trust_fragility * 1.0
+        self.trust_decay_per_day = self.trust_fragility * 0.03
+
+        # trust_focus_pressure → cross_client_decay
+        # At 0.5: cross_client_decay = 0.03
+        self.trust_cross_client_decay = self.trust_focus_pressure * 0.06
+
+        # trust_reward_ceiling → reward_scale
+        # ceiling = base_multiplier + ref_mult² × scale × trust_max
+        # Using Premium reference (mult≈1.3): scale = (ceiling - 0.50) / (1.69 × trust_max)
+        ref_mult_sq = 1.69  # 1.3²
+        self.trust_reward_scale = (
+            (self.trust_reward_ceiling - self.trust_base_multiplier)
+            / (ref_mult_sq * self.trust_max)
+        )
+
+        # trust_gating_fraction → threshold + ramp
+        # At 0.2: threshold=0.6, ramp=0.4 (top 40% CAN require, effective ~20%)
+        self.trust_reward_threshold = max(0.0, 1.0 - 2.0 * self.trust_gating_fraction)
+        self.trust_reward_ramp = min(1.0, 2.0 * self.trust_gating_fraction)
+
+        return self
 
     @model_validator(mode="after")
     def _salary_shares_sum_to_one(self) -> WorldConfig:

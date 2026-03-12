@@ -51,6 +51,14 @@ salary_bump_pct = 0.01
 # Prestige scaling starting to reward climbing.
 reward_prestige_scale = 0.45
 
+# --- Client trust (balanced: default build speed, moderate penalties) ---
+trust_build_rate         = 20.0
+trust_fragility          = 0.5
+trust_focus_pressure     = 0.5
+trust_reward_ceiling     = 2.6
+trust_work_reduction_max = 0.40
+trust_gating_fraction    = 0.20
+
 [world.dist.required_prestige]
 type = "triangular"
 low  = 1

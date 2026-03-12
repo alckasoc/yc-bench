@@ -83,7 +83,7 @@ def _seed_employees(db, company, req):
 
 def _seed_clients(db, company, req):
     """Create Client rows and ClientTrust rows (all starting at 0.0)."""
-    generated = generate_clients(run_seed=req.run_seed, count=req.cfg.num_clients)
+    generated = generate_clients(run_seed=req.run_seed, count=req.cfg.num_clients, cfg=req.cfg)
     clients = []
     for gc in generated:
         client = Client(id=uuid4(), name=gc.name, reward_multiplier=gc.reward_multiplier,

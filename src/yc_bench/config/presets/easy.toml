@@ -44,6 +44,14 @@ salary_bump_pct = 0.005
 # Low reward scaling — prestige climbing not yet necessary.
 reward_prestige_scale = 0.3
 
+# --- Client trust (forgiving: builds fairly fast, mild penalties) ---
+trust_build_rate         = 15.0
+trust_fragility          = 0.3
+trust_focus_pressure     = 0.3
+trust_reward_ceiling     = 2.8
+trust_work_reduction_max = 0.40
+trust_gating_fraction    = 0.15
+
 [world.dist.required_prestige]
 type = "triangular"
 low  = 1
