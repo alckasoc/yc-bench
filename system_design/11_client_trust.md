@@ -109,11 +109,9 @@ Diminishing returns: ~0.40/task at trust 0, ~0.07/task at trust 4.
 
 **Why**: Cross-client decay penalizes scattering and rewards focusing on 2–3 clients.
 
-## Sim Resume Blocking
+## Sim Resume When Idle
 
-`sim resume` is blocked when no active tasks. Auto-advance also skips when idle.
-
-**Why**: Prevents LLM from burning months of payroll while doing nothing.
+`sim resume` is allowed even with no active tasks — time moves forward regardless. Calling it while idle advances to the next payroll event, burning runway with zero revenue. The prompt warns the agent not to do this, but doesn't prevent it. If the agent ignores the warning and burns payroll, that's a valid failure mode.
 
 ## Agent Visibility
 
