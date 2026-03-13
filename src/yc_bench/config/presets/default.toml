@@ -77,6 +77,22 @@ penalty_cancel_multiplier  = 2.0    # hardened: was 1.2
 # At 0.55: a prestige-8 task pays ~4.85x more than a prestige-1 task.
 reward_prestige_scale = 0.55    # hardened: was 0.3
 
+# --- Client trust ---
+# trust_build_rate:       ~tasks to reach 80% max trust (higher = slower)
+# trust_fragility:        0-1, how punishing failures/inactivity are
+# trust_focus_pressure:   0-1, penalty for spreading work across clients
+# trust_reward_ceiling:   payout multiplier a Premium client gives at max trust
+# trust_work_reduction_max: max work reduction at max trust
+# trust_gating_fraction:  fraction of tasks that require established trust
+num_clients              = 8
+trust_max                = 5.0
+trust_build_rate         = 20.0
+trust_fragility          = 0.5
+trust_focus_pressure     = 0.5
+trust_reward_ceiling     = 2.6
+trust_work_reduction_max = 0.40
+trust_gating_fraction    = 0.20
+
 # Daily prestige decay per domain. Domains not exercised lose prestige
 # over time: -0.005/day → -0.15/month. Untouched domain drops ~1 level
 # every ~6 months. Prevents single-domain hyper-specialization.

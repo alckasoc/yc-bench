@@ -67,6 +67,14 @@ salary_bump_pct = 0.02
 # This is what makes the prestige climb existentially necessary.
 reward_prestige_scale = 0.7
 
+# --- Client trust (brutal: very slow build, severe penalties, tight ceiling) ---
+trust_build_rate         = 30.0
+trust_fragility          = 0.9
+trust_focus_pressure     = 0.8
+trust_reward_ceiling     = 2.2
+trust_work_reduction_max = 0.30
+trust_gating_fraction    = 0.30
+
 [world.dist.required_prestige]
 type = "triangular"
 low  = 1

@@ -184,7 +184,16 @@ def run_agent_loop(
                     turns_since_resume = 0
 
         if resume_payload is not None:
-            run_state.next_user_input = _build_resume_handoff_user_input(resume_payload)
+            # Query full state so the agent sees active/planned task counts
+            # and gets the "ACTION REQUIRED" nudge when idle.
+            wake_events = resume_payload.get("wake_events") or []
+            with db_factory() as db:
+                post_resume_snapshot = _snapshot_state(db, company_id)
+            run_state.next_user_input = build_turn_context(
+                turn_number=run_state.turn_count + 1,
+                **post_resume_snapshot,
+                last_wake_events=wake_events,
+            )
             reason = resume_payload.get("terminal_reason")
             if reason == "bankruptcy":
                 run_state.mark_terminal(TerminalReason.BANKRUPTCY, reason)

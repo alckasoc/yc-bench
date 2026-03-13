@@ -43,9 +43,9 @@ def _sample_salary_cents(rng, cfg, tier_name):
     return sample_right_skew_triangular_int(rng, tier.min_cents, tier.max_cents)
 
 
-def _sample_domain_rates(rng, max_rate):
-    """Sample each domain's rate independently from 0 to max_rate."""
-    return [round(rng.uniform(0, max_rate), 4) for _ in range(_NUM_DOMAINS)]
+def _sample_domain_rates(rng, min_rate, max_rate):
+    """Sample each domain's rate independently from min_rate to max_rate."""
+    return [round(rng.uniform(min_rate, max_rate), 4) for _ in range(_NUM_DOMAINS)]
 
 
 def generate_employees(*, run_seed, count, cfg=None):
@@ -68,7 +68,7 @@ def generate_employees(*, run_seed, count, cfg=None):
         tier_name = tiers[idx - 1]
         tier_cfg = _tier_by_name(cfg, tier_name)
 
-        domain_rates = _sample_domain_rates(rng, max_rate=tier_cfg.rate_max)
+        domain_rates = _sample_domain_rates(rng, min_rate=tier_cfg.rate_min, max_rate=tier_cfg.rate_max)
         rates = dict(zip(_ALL_DOMAINS, domain_rates))
 
         employees.append(

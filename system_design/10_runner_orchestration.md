@@ -134,6 +134,50 @@ class RunSession:
 
 **Design choice**: Session object encapsulates all run-specific state, making it easy to serialize and manage runs.
 
+## Bot Runner Baselines (`scripts/bot_runner.py`)
+
+The bot runner provides deterministic heuristic baselines that operate under the **same constraints** as the LLM agent:
+
+- Same market visibility (browse limit of 50, prestige/trust gating)
+- Same economic rules (trust multiplier, work reduction, payroll, salary bumps)
+- Same sim resume blocking (no time advance without active tasks)
+- Direct DB access (bypasses CLI parsing overhead but applies identical logic)
+
+### Available Strategies
+
+| Strategy | Selection Heuristic |
+|----------|-------------------|
+| `greedy` | Highest reward among accessible tasks |
+| `random` | Random selection (deterministic via seeded RNG) |
+| `throughput` | Highest reward per estimated completion hour |
+| `prestige` | Phase 1 (prestige < 5): fastest prestige gain. Phase 2: throughput |
+
+### Greedy Baseline Design
+
+The greedy bot is the **"zero strategy" floor** that any competent LLM agent should beat:
+
+- **Sequential execution**: 1 task at a time (`MAX_CONCURRENT_TASKS = 1`)
+- **1 task accepted per turn**: Mirrors the LLM's effective pace (browse → accept → assign → dispatch = ~1 task/turn)
+- **All employees assigned**: Every employee works on the single active task
+- **Prestige-aware browsing**: Filters market by `required_prestige <= floor(max_prestige)`, sorted by reward DESC
+- **No completable filter**: All accessible tasks are candidates (blind to actual completion probability)
+- **Tier-average rate estimation**: Uses `E[uniform(0, max_rate)]` per tier for ETA estimates (same information the LLM has)
+- **Trust/prestige gating**: Respects the same acceptance requirements as the LLM
+
+**Design choice**: The greedy bot is intentionally simple — it has no workload management, no client strategy, no domain alignment, and no long-term planning. It picks the highest-paying task it can access and throws all resources at it. This makes it a reliable floor: if an LLM agent can't beat "always pick the biggest number," the agent isn't adding strategic value.
+
+### Usage
+
+```bash
+# Single strategy/config/seed
+uv run python scripts/bot_runner.py --bot greedy --config medium --seed 1
+
+# All strategies × all configs × all seeds
+uv run python scripts/bot_runner.py
+```
+
+Output is written to `results/yc_bench_result_{config}_{seed}_{bot_slug}.json` in the same format as LLM runs, enabling direct comparison in plots.
+
 ## Batch Running (`scripts/`)
 
 ### Multi-Seed Runs

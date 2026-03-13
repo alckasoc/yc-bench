@@ -1,10 +1,16 @@
 """Bot runner: plays YC-Bench using direct DB access with pluggable strategies.
 
 Strategies:
-  greedy     — pick highest reward among completable tasks
-  random     — pick randomly among completable tasks (deterministic via RngStreams)
-  throughput — pick highest reward/hour among completable tasks
+  greedy     — pick highest reward among accessible tasks
+  random     — pick randomly among accessible tasks (deterministic via RngStreams)
+  throughput — pick highest reward/hour among accessible tasks
   prestige   — phase 1: climb prestige fast, phase 2: throughput
+
+The bot operates under the same constraints as the LLM agent:
+  - Same market visibility (browse limit, prestige/trust gating)
+  - Same economic rules (trust multiplier, work reduction, payroll, salary bumps)
+  - Runs multiple concurrent tasks (like the LLM agent does)
+  - Must have active tasks before time advances (same as LLM sim resume block)
 
 Usage:
   uv run python scripts/bot_runner.py                    # all bots, all configs, all seeds
@@ -43,7 +49,10 @@ from yc_bench.services.seed_world import SeedWorldRequest, seed_world_transactio
 CONFIGS = ["medium", "hard", "nightmare"]
 SEEDS = [1, 2, 3]
 
-MAX_TASK_CYCLES = None  # No cap — bot plays until horizon end
+# Baseline runs 1 task at a time — simple sequential greedy with no
+# workload management. This is the "zero strategy" floor that any
+# competent LLM agent should beat.
+MAX_CONCURRENT_TASKS = 1
 
 
 @dataclass
@@ -91,21 +100,44 @@ def _compute_deadline(accepted_at, max_domain_qty, cfg):
     return add_business_hours(accepted_at, Decimal(str(biz_days)) * Decimal(str(work_hours)))
 
 
-def _build_candidates(db, company_id, sim_state, world_cfg, employee_tiers):
-    """Build CandidateTask list for all market tasks the company can accept (per-domain prestige gating).
+def _build_candidates(db, company_id, sim_state, world_cfg, employee_tiers, n_active=0):
+    """Build CandidateTask list from the same limited market window the LLM sees.
 
-    Uses tier-average rates (blind to actual per-domain skills) to mirror
-    the information available to an LLM agent.
+    Mirrors the LLM's constraints:
+    - Only sees `market_browse_default_limit` tasks (default 50), not the full market
+    - Respects prestige requirements (per-domain gating)
+    - Respects trust requirements (can't accept tasks above current trust level)
+    - Uses tier-average rates (blind to actual per-domain skills)
     """
+    from yc_bench.db.models.client import ClientTrust
+
     prestige_rows = db.query(CompanyPrestige).filter(
         CompanyPrestige.company_id == company_id
     ).all()
     prestige_map = {p.domain: float(p.prestige_level) for p in prestige_rows}
-    min_prestige = min(prestige_map.values()) if prestige_map else 1.0
+    max_prestige = max(prestige_map.values()) if prestige_map else 1.0
 
-    market_tasks = db.query(Task).filter(
-        Task.status == TaskStatus.MARKET,
-    ).order_by(Task.reward_funds_cents.desc()).all()
+    # Build trust map for trust requirement checks
+    trust_rows = db.query(ClientTrust).filter(
+        ClientTrust.company_id == company_id
+    ).all()
+    trust_map = {str(ct.client_id): float(ct.trust_level) for ct in trust_rows}
+
+    # Browse market with prestige filter (same as LLM's `market browse --required-prestige-lte N`).
+    # Then paginate within accessible tasks, limited to browse_limit per page.
+    browse_limit = world_cfg.market_browse_default_limit  # default: 50
+    # Use floor of max prestige as filter (greedy: take best available at current level)
+    prestige_filter = int(max_prestige)
+    market_tasks = (
+        db.query(Task)
+        .filter(
+            Task.status == TaskStatus.MARKET,
+            Task.required_prestige <= prestige_filter,
+        )
+        .order_by(Task.reward_funds_cents.desc())
+        .limit(browse_limit)
+        .all()
+    )
 
     candidates = []
     for task in market_tasks:
@@ -121,26 +153,26 @@ def _build_candidates(db, company_id, sim_state, world_cfg, employee_tiers):
         if not meets_prestige:
             continue
 
-        max_domain_qty = max(float(r.required_qty) for r in reqs)
+        # Trust requirement check (same validation as CLI task accept)
+        if task.required_trust > 0 and task.client_id is not None:
+            client_trust = trust_map.get(str(task.client_id), 0.0)
+            if client_trust < task.required_trust:
+                continue
+
         task_reqs = [{"domain": r.domain, "required_qty": float(r.required_qty)} for r in reqs]
-
-        completion_hours = estimate_completion_hours(task_reqs, employee_tiers, n_concurrent_tasks=1)
-
-        is_completable = False
-        if completion_hours is not None:
-            deadline = _compute_deadline(sim_state.sim_time, max_domain_qty, world_cfg)
-            completion_time = add_business_hours(sim_state.sim_time, completion_hours)
-            is_completable = completion_time <= deadline
+        # Estimate hours accounting for concurrent task split
+        concurrent = max(1, n_active + 1)
+        completion_hours = estimate_completion_hours(task_reqs, employee_tiers, n_concurrent_tasks=concurrent)
 
         candidates.append(CandidateTask(
             task=task,
             reward_cents=task.reward_funds_cents,
             prestige_delta=float(task.reward_prestige_delta),
             completion_hours=completion_hours if completion_hours is not None else Decimal("999999"),
-            is_completable=is_completable,
+            is_completable=True,  # Always accessible = always a candidate
         ))
 
-    return candidates, min_prestige
+    return candidates, max_prestige
 
 
 # ── Strategy functions ──────────────────────────────────────────────────────
@@ -148,42 +180,40 @@ def _build_candidates(db, company_id, sim_state, world_cfg, employee_tiers):
 StrategyFn = Callable  # (completable: list[CandidateTask], context: dict) -> Optional[CandidateTask]
 
 
-def strategy_greedy(completable: list[CandidateTask], context: dict) -> Optional[CandidateTask]:
+def strategy_greedy(candidates: list[CandidateTask], context: dict) -> Optional[CandidateTask]:
     """Pick the task with the highest reward."""
-    if not completable:
+    if not candidates:
         return None
-    return max(completable, key=lambda c: c.reward_cents)
+    return max(candidates, key=lambda c: c.reward_cents)
 
 
-def strategy_random(completable: list[CandidateTask], context: dict) -> Optional[CandidateTask]:
-    """Pick a random completable task (deterministic via seeded RNG)."""
-    if not completable:
+def strategy_random(candidates: list[CandidateTask], context: dict) -> Optional[CandidateTask]:
+    """Pick a random accessible task (deterministic via seeded RNG)."""
+    if not candidates:
         return None
     seed = context["seed"]
     turn = context["turn"]
     rng = RngStreams(seed).stream(f"bot_random_select:{turn}")
-    return rng.choice(completable)
+    return rng.choice(candidates)
 
 
-def strategy_throughput(completable: list[CandidateTask], context: dict) -> Optional[CandidateTask]:
+def strategy_throughput(candidates: list[CandidateTask], context: dict) -> Optional[CandidateTask]:
     """Pick the task with the highest reward per hour."""
-    if not completable:
+    if not candidates:
         return None
-    return max(completable, key=lambda c: Decimal(c.reward_cents) / c.completion_hours)
+    return max(candidates, key=lambda c: Decimal(c.reward_cents) / c.completion_hours)
 
 
-def strategy_prestige(completable: list[CandidateTask], context: dict) -> Optional[CandidateTask]:
-    """Phase 1 (prestige < 5): climb prestige fastest. Phase 2: throughput."""
-    if not completable:
+def strategy_prestige(candidates: list[CandidateTask], context: dict) -> Optional[CandidateTask]:
+    """Phase 1 (prestige < 5): climb prestige fast. Phase 2: throughput."""
+    if not candidates:
         return None
     current_prestige = context["max_prestige"]
     if current_prestige < 5:
-        # Prefer tasks that give prestige delta per hour of work
-        prestige_tasks = [c for c in completable if c.prestige_delta > 0]
+        prestige_tasks = [c for c in candidates if c.prestige_delta > 0]
         if prestige_tasks:
             return max(prestige_tasks, key=lambda c: Decimal(str(c.prestige_delta)) / c.completion_hours)
-    # Fall back to throughput
-    return max(completable, key=lambda c: Decimal(c.reward_cents) / c.completion_hours)
+    return max(candidates, key=lambda c: Decimal(c.reward_cents) / c.completion_hours)
 
 
 STRATEGIES = {
@@ -252,7 +282,6 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
 
     tasks_completed = 0
     tasks_failed = 0
-    task_cycles_used = 0
     turn = 0
 
     while True:
@@ -267,113 +296,174 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
             if sim_state.sim_time >= sim_state.horizon_end:
                 break
 
-            active_tasks = db.query(Task).filter(
+            active_count = db.query(Task).filter(
                 Task.company_id == company_id,
                 Task.status == TaskStatus.ACTIVE,
-            ).all()
+            ).count()
 
-            if active_tasks:
+            # Accept up to 1 new task per turn (same pace as LLM agent).
+            # The LLM spends multiple tool calls to browse/accept/assign/dispatch
+            # one task, so it effectively accepts ~1 per turn.
+            newly_accepted = []
+            while active_count + len(newly_accepted) < MAX_CONCURRENT_TASKS and len(newly_accepted) < 1:
+                employees = db.query(Employee).filter(Employee.company_id == company_id).all()
+                employee_tiers = [emp.tier for emp in employees]
+                employee_ids = [emp.id for emp in employees]
+
+                n_will_be_active = active_count + len(newly_accepted)
+                candidates, max_prestige = _build_candidates(
+                    db, company_id, sim_state, world_cfg, employee_tiers,
+                    n_active=n_will_be_active,
+                )
+
+                context = {
+                    "seed": seed,
+                    "turn": turn + len(newly_accepted),  # vary context per pick
+                    "max_prestige": max_prestige,
+                }
+                chosen = strategy_fn(candidates, context)
+                if chosen is None:
+                    break
+
+                task = chosen.task
+                newly_accepted.append(task.id)
+
+                # Accept the task — same logic as CLI task accept
+                reqs = db.query(TaskRequirement).filter(
+                    TaskRequirement.task_id == task.id
+                ).all()
+
+                # Apply trust reward multiplier and work reduction
+                if task.client_id is not None:
+                    from yc_bench.db.models.client import Client, ClientTrust
+                    client_row = db.query(Client).filter(Client.id == task.client_id).one_or_none()
+                    client_multiplier = client_row.reward_multiplier if client_row else 1.0
+                    ct = db.query(ClientTrust).filter(
+                        ClientTrust.company_id == company_id,
+                        ClientTrust.client_id == task.client_id,
+                    ).one_or_none()
+                    trust_level = float(ct.trust_level) if ct else 0.0
+                    trust_multiplier = (
+                        world_cfg.trust_base_multiplier
+                        + (client_multiplier ** 2) * world_cfg.trust_reward_scale
+                        * (trust_level ** 2) / world_cfg.trust_max
+                    )
+                    task.reward_funds_cents = int(task.reward_funds_cents * trust_multiplier)
+                    work_reduction = world_cfg.trust_work_reduction_max * (trust_level / world_cfg.trust_max)
+                    for r in reqs:
+                        r.required_qty = int(float(r.required_qty) * (1 - work_reduction))
+
+                max_domain_qty = max(float(r.required_qty) for r in reqs)
+
+                task.status = TaskStatus.PLANNED
+                task.company_id = company_id
+                task.accepted_at = sim_state.sim_time
+                task.deadline = _compute_deadline(sim_state.sim_time, max_domain_qty, world_cfg)
+
+                # Generate replacement
+                counter = sim_state.replenish_counter
+                sim_state.replenish_counter = counter + 1
+
+                from yc_bench.db.models.client import Client as ClientModel
+                replaced_client_index = 0
+                if task.client_id is not None:
+                    clients = db.query(ClientModel).order_by(ClientModel.name).all()
+                    for i, c in enumerate(clients):
+                        if c.id == task.client_id:
+                            replaced_client_index = i
+                            break
+
+                replacement_spec_domains = None
+                if task.client_id is not None:
+                    orig_client = db.query(ClientModel).filter(ClientModel.id == task.client_id).one_or_none()
+                    if orig_client:
+                        replacement_spec_domains = orig_client.specialty_domains
+
+                replacement = generate_replacement_task(
+                    run_seed=sim_state.run_seed,
+                    replenish_counter=counter,
+                    replaced_prestige=task.required_prestige,
+                    replaced_client_index=replaced_client_index,
+                    cfg=world_cfg,
+                    specialty_domains=replacement_spec_domains,
+                )
+
+                clients = db.query(ClientModel).order_by(ClientModel.name).all()
+                replacement_client = clients[replacement.client_index % len(clients)] if clients else None
+                replacement_client_id = replacement_client.id if replacement_client else None
+
+                replacement_row = Task(
+                    id=uuid4(),
+                    company_id=None,
+                    client_id=replacement_client_id,
+                    status=TaskStatus.MARKET,
+                    title=replacement.title,
+                    required_prestige=replacement.required_prestige,
+                    reward_funds_cents=replacement.reward_funds_cents,
+                    reward_prestige_delta=replacement.reward_prestige_delta,
+                    skill_boost_pct=replacement.skill_boost_pct,
+                    accepted_at=None, deadline=None, completed_at=None,
+                    success=None, progress_milestone_pct=0,
+                    required_trust=replacement.required_trust,
+                )
+                db.add(replacement_row)
+                for domain, qty in replacement.requirements.items():
+                    db.add(TaskRequirement(
+                        task_id=replacement_row.id,
+                        domain=domain,
+                        required_qty=qty,
+                        completed_qty=0,
+                    ))
+
+                # Assign ALL employees to this task
+                for eid in employee_ids:
+                    db.add(TaskAssignment(
+                        task_id=task.id,
+                        employee_id=eid,
+                        assigned_at=sim_state.sim_time,
+                    ))
+                db.flush()
+
+                task.status = TaskStatus.ACTIVE
+                db.flush()
+
+            # Recalculate ETAs for all newly accepted tasks
+            if newly_accepted:
+                recalculate_etas(db, company_id, sim_state.sim_time,
+                                 impacted_task_ids=set(newly_accepted),
+                                 milestones=world_cfg.task_progress_milestones)
+
+            # Now advance time (only if we have active tasks)
+            total_active = active_count + len(newly_accepted)
+            if total_active == 0:
+                # No accessible tasks at all — advance to next event to let
+                # prestige/trust change, then try again.
                 next_event = fetch_next_event(db, company_id, sim_state.horizon_end)
                 if next_event is None:
                     break
                 adv = advance_time(db, company_id, next_event.scheduled_at)
-                for we in adv.wake_events:
-                    if we.get("type") == "task_completed":
-                        if we.get("success"):
-                            tasks_completed += 1
-                        else:
-                            tasks_failed += 1
                 if adv.bankrupt or adv.horizon_reached:
                     break
                 continue
 
-            # Get employees — only tier info (same as LLM agent sees)
-            employees = db.query(Employee).filter(Employee.company_id == company_id).all()
-            employee_tiers = [emp.tier for emp in employees]
-            employee_ids = [emp.id for emp in employees]
+            next_event = fetch_next_event(db, company_id, sim_state.horizon_end)
+            if next_event is None:
+                break
+            adv = advance_time(db, company_id, next_event.scheduled_at)
+            for we in adv.wake_events:
+                if we.get("type") == "task_completed":
+                    if we.get("success"):
+                        tasks_completed += 1
+                    else:
+                        tasks_failed += 1
+            if adv.bankrupt or adv.horizon_reached:
+                break
 
-            candidates, max_prestige = _build_candidates(db, company_id, sim_state, world_cfg, employee_tiers)
-            completable = [c for c in candidates if c.is_completable]
 
-            context = {
-                "seed": seed,
-                "turn": turn,
-                "max_prestige": max_prestige,
-            }
-            chosen = strategy_fn(completable, context)
+    # Final state + extract time series for plotting
+    from yc_bench.runner.extract import extract_time_series
+    import json
 
-            if chosen is None:
-                next_event = fetch_next_event(db, company_id, sim_state.horizon_end)
-                if next_event is None:
-                    adv = advance_time(db, company_id, sim_state.horizon_end)
-                    break
-                adv = advance_time(db, company_id, next_event.scheduled_at)
-                if adv.bankrupt or adv.horizon_reached:
-                    break
-                continue
-
-            best_task = chosen.task
-
-            # Accept the task
-            reqs = db.query(TaskRequirement).filter(
-                TaskRequirement.task_id == best_task.id
-            ).all()
-            max_domain_qty = max(float(r.required_qty) for r in reqs)
-
-            best_task.status = TaskStatus.PLANNED
-            best_task.company_id = company_id
-            best_task.accepted_at = sim_state.sim_time
-            best_task.deadline = _compute_deadline(sim_state.sim_time, max_domain_qty, world_cfg)
-
-            # Generate replacement
-            counter = sim_state.replenish_counter
-            sim_state.replenish_counter = counter + 1
-            replacement = generate_replacement_task(
-                run_seed=sim_state.run_seed,
-                replenish_counter=counter,
-                replaced_prestige=best_task.required_prestige,
-                cfg=world_cfg,
-            )
-            replacement_row = Task(
-                id=uuid4(),
-                company_id=None,
-                status=TaskStatus.MARKET,
-                title=replacement.title,
-                required_prestige=replacement.required_prestige,
-                reward_funds_cents=replacement.reward_funds_cents,
-                reward_prestige_delta=replacement.reward_prestige_delta,
-                skill_boost_pct=replacement.skill_boost_pct,
-                accepted_at=None, deadline=None, completed_at=None,
-                success=None, progress_milestone_pct=0,
-            )
-            db.add(replacement_row)
-            for domain, qty in replacement.requirements.items():
-                db.add(TaskRequirement(
-                    task_id=replacement_row.id,
-                    domain=domain,
-                    required_qty=qty,
-                    completed_qty=0,
-                ))
-
-            # Assign ALL employees
-            for eid in employee_ids:
-                db.add(TaskAssignment(
-                    task_id=best_task.id,
-                    employee_id=eid,
-                    assigned_at=sim_state.sim_time,
-                ))
-            db.flush()
-
-            best_task.status = TaskStatus.ACTIVE
-            db.flush()
-
-            recalculate_etas(db, company_id, sim_state.sim_time,
-                             impacted_task_ids={best_task.id},
-                             milestones=world_cfg.task_progress_milestones)
-
-            task_cycles_used += 1
-
-    # Final state
     with session_scope(factory) as db:
         company = db.query(Company).filter(Company.id == company_id).one()
         sim_state = db.query(SimState).first()
@@ -386,6 +476,27 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
         ).all()
         max_p = max((float(p.prestige_level) for p in prestige_rows), default=1.0)
 
+    time_series = extract_time_series(lambda: session_scope(factory), company_id)
+
+    # Write result JSON (same format as LLM runner for plot compatibility)
+    result_json = {
+        "session_id": f"bot-{seed}-{bot_slug}",
+        "model": bot_slug,
+        "seed": seed,
+        "horizon_years": cfg.sim.horizon_years,
+        "turns_completed": turn,
+        "terminal": True,
+        "terminal_reason": "bankrupt" if bankrupt else "horizon_end",
+        "terminal_detail": "bankrupt" if bankrupt else "horizon_end",
+        "total_cost_usd": 0,
+        "time_series": time_series,
+    }
+    results_dir = Path("results")
+    results_dir.mkdir(exist_ok=True)
+    result_path = results_dir / f"yc_bench_result_{config_name}_{seed}_{bot_slug}.json"
+    with open(result_path, "w") as f:
+        json.dump(result_json, f, indent=2)
+
     return {
         "config": config_name,
         "seed": seed,
@@ -396,6 +507,7 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
         "tasks_completed": tasks_completed,
         "tasks_failed": tasks_failed,
         "max_prestige": max_p,
+        "result_path": str(result_path),
     }
 
 

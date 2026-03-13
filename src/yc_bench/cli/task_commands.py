@@ -10,6 +10,7 @@ from sqlalchemy import func
 
 from ..core.business_time import add_business_hours
 from ..core.eta import recalculate_etas
+from ..db.models.client import Client, ClientTrust
 from ..db.models.company import Company, CompanyPrestige
 from ..db.models.employee import Employee
 from ..db.models.event import SimEvent
@@ -72,6 +73,40 @@ def task_accept(
                     f"Company prestige in {req.domain.value} ({domain_prestige:.1f}) "
                     f"does not meet task requirement ({task.required_prestige})."
                 )
+        # Validate client trust requirement
+        trust_level = 0.0
+        if task.client_id is not None:
+            ct = db.query(ClientTrust).filter(
+                ClientTrust.company_id == company_id,
+                ClientTrust.client_id == task.client_id,
+            ).one_or_none()
+            if ct is not None:
+                trust_level = float(ct.trust_level)
+            if task.required_trust > 0 and trust_level < task.required_trust:
+                client = db.query(Client).filter(Client.id == task.client_id).one_or_none()
+                client_name = client.name if client else "unknown"
+                error_output(
+                    f"Client trust with {client_name} ({trust_level:.1f}) "
+                    f"does not meet task requirement ({task.required_trust})."
+                )
+
+        # Apply trust reward multiplier and work reduction at accept time
+        _cfg = _get_world_cfg()
+        if task.client_id is not None:
+            client_row = db.query(Client).filter(Client.id == task.client_id).one_or_none()
+            client_multiplier = client_row.reward_multiplier if client_row else 1.0
+            # Reward: continuous formula
+            trust_multiplier = (
+                _cfg.trust_base_multiplier
+                + (client_multiplier ** 2) * _cfg.trust_reward_scale
+                * (trust_level ** 2) / _cfg.trust_max
+            )
+            task.reward_funds_cents = int(task.reward_funds_cents * trust_multiplier)
+            # Work reduction: trusted clients give clearer specs → less work
+            work_reduction = _cfg.trust_work_reduction_max * (trust_level / _cfg.trust_max)
+            for r in reqs:
+                r.required_qty = int(float(r.required_qty) * (1 - work_reduction))
+
         max_domain_qty = max(float(r.required_qty) for r in reqs)
         accepted_at = sim_state.sim_time
         deadline = _compute_deadline(accepted_at, max_domain_qty)
@@ -82,19 +117,44 @@ def task_accept(
         task.accepted_at = accepted_at
         task.deadline = deadline
 
-        # Generate replacement task
+        # Generate replacement task (inherits same client for stable market distribution)
         counter = sim_state.replenish_counter
         sim_state.replenish_counter = counter + 1
+
+        # Find the client index for the accepted task
+        replaced_client_index = 0
+        if task.client_id is not None:
+            clients = db.query(Client).order_by(Client.name).all()
+            for i, c in enumerate(clients):
+                if c.id == task.client_id:
+                    replaced_client_index = i
+                    break
+
+        # Get specialty domains for the replacement client
+        replacement_spec_domains = None
+        if task.client_id is not None:
+            orig_client = db.query(Client).filter(Client.id == task.client_id).one_or_none()
+            if orig_client:
+                replacement_spec_domains = orig_client.specialty_domains
+
         replacement = generate_replacement_task(
             run_seed=sim_state.run_seed,
             replenish_counter=counter,
             replaced_prestige=task.required_prestige,
+            replaced_client_index=replaced_client_index,
             cfg=_get_world_cfg(),
+            specialty_domains=replacement_spec_domains,
         )
+
+        # Look up the actual client for the replacement
+        clients = db.query(Client).order_by(Client.name).all()
+        replacement_client = clients[replacement.client_index % len(clients)] if clients else None
+        replacement_client_id = replacement_client.id if replacement_client else None
 
         replacement_row = Task(
             id=uuid4(),
             company_id=None,
+            client_id=replacement_client_id,
             status=TaskStatus.MARKET,
             title=replacement.title,
             required_prestige=replacement.required_prestige,
@@ -106,6 +166,7 @@ def task_accept(
             completed_at=None,
             success=None,
             progress_milestone_pct=0,
+            required_trust=replacement.required_trust,
         )
         db.add(replacement_row)
 
@@ -295,10 +356,18 @@ def task_list(
                 if sim_state.sim_time > task.deadline:
                     at_risk = True
 
+            # Look up client name
+            client_name = None
+            if task.client_id is not None:
+                client = db.query(Client).filter(Client.id == task.client_id).one_or_none()
+                if client:
+                    client_name = client.name
+
             results.append({
                 "task_id": str(task.id),
                 "title": task.title,
                 "status": task.status.value,
+                "client_name": client_name,
                 "progress_pct": round(progress_pct, 2),
                 "deadline": task.deadline.isoformat() if task.deadline else None,
                 "at_risk": at_risk,
@@ -351,11 +420,20 @@ def task_inspect(
         total_completed = sum(float(r.completed_qty) for r in reqs)
         progress_pct = (total_completed / total_required * 100) if total_required > 0 else 0.0
 
+        # Look up client name
+        client_name = None
+        if task.client_id is not None:
+            client_row = db.query(Client).filter(Client.id == task.client_id).one_or_none()
+            if client_row:
+                client_name = client_row.name
+
         json_output({
             "task_id": str(task.id),
             "title": task.title,
             "status": task.status.value,
+            "client_name": client_name,
             "required_prestige": task.required_prestige,
+            "required_trust": task.required_trust,
             "reward_funds_cents": task.reward_funds_cents,
             "reward_prestige_delta": float(task.reward_prestige_delta),
             "skill_boost_pct": float(task.skill_boost_pct),
@@ -398,6 +476,19 @@ def task_cancel(
         cancel_penalty = Decimal(str(_cfg.penalty_cancel_multiplier)) * task.reward_prestige_delta
         reqs = db.query(TaskRequirement).filter(TaskRequirement.task_id == tid).all()
         penalties_applied = {}
+
+        # Apply client trust penalty for cancellation
+        trust_delta = 0.0
+        if task.client_id is not None:
+            ct = db.query(ClientTrust).filter(
+                ClientTrust.company_id == sim_state.company_id,
+                ClientTrust.client_id == task.client_id,
+            ).one_or_none()
+            if ct is not None:
+                old_level = float(ct.trust_level)
+                new_level = max(_cfg.trust_min, old_level - _cfg.trust_cancel_penalty)
+                trust_delta = new_level - old_level
+                ct.trust_level = Decimal(str(round(new_level, 3)))
 
         for req in reqs:
             prestige = db.query(CompanyPrestige).filter(
@@ -456,5 +547,6 @@ def task_cancel(
             "reason": reason,
             "cancel_penalty_per_domain": float(cancel_penalty),
             "prestige_changes": penalties_applied,
+            "trust_delta": trust_delta,
             "bankrupt": bankrupt,
         })

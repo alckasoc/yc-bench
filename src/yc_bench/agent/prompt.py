@@ -19,9 +19,10 @@ Your goal is to maximize company prestige and funds over the simulation horizon 
 ### Observe
 - `yc-bench company status` — funds, prestige, employee count, payroll, bankruptcy risk
 - `yc-bench employee list` — list all employees with IDs, tier (junior/mid/senior), salaries, and current assignments
-- `yc-bench market browse [--domain X] [--required-prestige-lte N] [--reward-min-cents N] [--limit N] [--offset N]` — browse available tasks (default limit 50; the response includes a `total` field — if total > 50, paginate with --offset to see more)
+- `yc-bench market browse [--domain X] [--required-prestige-lte N] [--reward-min-cents N] [--limit N] [--offset N]` — browse available tasks (default limit 50; the response includes a `total` field — if total > 50, paginate with --offset to see more). Tasks show `client_name` and `required_trust`.
 - `yc-bench task list [--status X]` — list your tasks (planned, active, completed, cancelled)
-- `yc-bench task inspect --task-id <UUID>` — detailed task info (requirements, assignments, progress)
+- `yc-bench task inspect --task-id <UUID>` — detailed task info (requirements, assignments, progress, client, trust requirement)
+- `yc-bench client list` — show all clients with current trust levels
 - `yc-bench finance ledger [--from MM/DD/YYYY] [--to MM/DD/YYYY] [--category X]` — financial history
 - `yc-bench report monthly [--from-month YYYY-MM] [--to-month YYYY-MM]` — monthly P&L
 - `yc-bench scratchpad read` — read your persistent notes
@@ -41,8 +42,8 @@ Your goal is to maximize company prestige and funds over the simulation horizon 
 
 ## Strategy Guidelines
 
-1. **Check company status first** to understand your financial position and runway.
-2. **Browse the market** for tasks you can accept (check prestige requirements).
+1. **Check company status first** to understand your financial position, runway, and **current prestige levels per domain**.
+2. **Browse the market at your prestige level** — use `--required-prestige-lte N` where N matches your highest prestige. Higher-prestige tasks pay significantly more (prestige-5 tasks pay ~2.2x more than prestige-1). As your prestige grows, ALWAYS increase your browse filter to find better-paying tasks.
 3. **Accept tasks** that match your capabilities and offer good reward-to-risk ratio.
 4. **Assign employees strategically** — employees split throughput across active tasks. Focus employees on fewer tasks for faster completion.
 5. **Dispatch tasks** once assigned, then continue monitoring progress/events via status and reports.
@@ -50,15 +51,45 @@ Your goal is to maximize company prestige and funds over the simulation horizon 
 7. **Watch payroll** — monthly salaries are deducted automatically. Don't let runway drop to zero.
 8. **Use status checks** to track critical milestones and risks.
 9. **Successful tasks** award funds + prestige + employee skill boosts. Build momentum.
+10. **Scale up over time** — regularly check `yc-bench company status` to see your prestige. Browse higher-prestige tasks as you grow — staying on prestige-1 tasks when you have prestige 5+ leaves enormous revenue on the table.
 
 ## Key Rules
 
-- Task completion at or before deadline = success (reward funds + prestige + skill boost)
-- Task completion after deadline = failure (0.8x prestige penalty, no reward)
-- Task cancellation = 1.2x prestige penalty per domain
+- Task completion at or before deadline = success (reward funds + prestige + skill boost + client trust gain)
+- Task completion after deadline = failure (0.8x prestige penalty, no reward, trust penalty)
+- Task cancellation = 1.2x prestige penalty per domain + trust penalty (worse than failure)
 - Employee throughput = base_rate / number_of_active_tasks_assigned
-- Time advances only when you run `yc-bench sim resume`
+- Time advances only when you run `yc-bench sim resume` — it jumps to the next event (task milestone at 25/50/75%, task completion, or monthly payroll). **Warning**: calling `sim resume` with no active tasks just skips to the next payroll, burning runway with zero revenue.
 - Prestige is clamped [1, 10]. Funds are in cents.
+
+## Client Trust
+
+- Each task is offered by a specific **client** (e.g. "Nexus AI", "Vertex Labs").
+- Trust affects TWO things: **reward** and **work required**.
+
+### Client Tiers and Specialties
+- Clients are classified into **tiers**: Standard, Premium, Enterprise. Higher tiers have higher reward potential at high trust.
+- Each client has **specialty domains** (e.g. "research", "training"). Tasks from a client are biased toward their specialties — a client specializing in "research" will mostly offer research-heavy tasks.
+- Use `yc-bench client list` to see each client's tier, specialties, and current trust level.
+
+### Reward Scaling
+- Listed rewards are **potential** — actual payout depends on trust. Without trust, you only receive about **50%** of the listed reward.
+- As trust grows, payouts increase significantly. Higher-tier clients scale better but start worse.
+- Observe actual payouts over time to gauge each client's true value.
+
+### Work Reduction
+- **Trusted clients give clearer specs** — work required shrinks with trust (up to 40% reduction at max trust).
+- This compounds with higher rewards: at high trust, you earn more in less time.
+
+### Strategy
+- **Domain alignment matters most**: Pick clients whose specialties match your company's prestige strengths. A Premium client aligned with your best domains may outperform an Enterprise client where you're weak.
+- **Focus on 2-3 clients** to build trust fast. Scattered work = perpetual low payouts + full work load.
+- **Compounding loop**: trust → less work → faster completion → more tasks per month → more trust → even better returns.
+- **Higher-tier clients are riskier early**: they pay less than Standard clients at low trust, but become very rewarding at high trust. Standard clients are safer to start with.
+- Completing tasks for a client builds **trust** [0.0–5.0]. Trust gains diminish as you approach max.
+- **Premium tasks require trust**: High-reward tasks require established trust (required_trust 1-4). Clients don't give their best projects to unproven vendors.
+- **Trust decays** daily — relationships need maintenance through continued work.
+- **Failures hurt**: -0.3 trust. **Cancellations hurt more**: -0.5 trust.
 """
 
 
@@ -118,13 +149,14 @@ def build_turn_context(
     if active_tasks == 0 and planned_tasks == 0:
         parts.append(
             "\n**ACTION REQUIRED**: No tasks are running. "
-            "Accept a task, assign employees to it, dispatch it, then call `yc-bench sim resume`. "
-            "Do this now — every turn without active tasks burns runway."
+            "Do NOT call `sim resume` — it will just burn payroll with zero revenue. "
+            "Accept a task, assign employees to it, and dispatch it first."
         )
     elif planned_tasks > 0 and active_tasks == 0:
         parts.append(
             "\n**ACTION REQUIRED**: You have planned tasks but none are dispatched. "
-            "Assign employees and dispatch now, then call `yc-bench sim resume`."
+            "Do NOT call `sim resume` yet — dispatch first or you'll just burn payroll. "
+            "Assign employees and dispatch now."
         )
     else:
         parts.append("\nDecide your next actions. Use `run_command` to execute CLI commands.")
@@ -169,12 +201,13 @@ def build_initial_user_prompt(
         "",
         "**Your immediate priority**: generate revenue before payroll drains your runway.",
         "You MUST complete these steps now (multiple commands per turn are fine):",
-        "1. `yc-bench market browse --required-prestige-lte 1` — find tasks you can accept",
-        "2. `yc-bench task accept --task-id <UUID>` — accept 2-3 suitable tasks",
-        "3. `yc-bench employee list` — get employee IDs",
-        "4. `yc-bench task assign --task-id <UUID> --employee-id <UUID>` — assign employees",
-        "5. `yc-bench task dispatch --task-id <UUID>` — start work on each assigned task",
-        "6. `yc-bench sim resume` — advance time to collect the first task completion event",
+        "1. `yc-bench company status` — check your current prestige levels",
+        "2. `yc-bench market browse` — find tasks you can accept (use `--required-prestige-lte N` matching your prestige)",
+        "3. `yc-bench task accept --task-id <UUID>` — accept 2-3 suitable tasks",
+        "4. `yc-bench employee list` — get employee IDs",
+        "5. `yc-bench task assign --task-id <UUID> --employee-id <UUID>` — assign employees",
+        "6. `yc-bench task dispatch --task-id <UUID>` — start work on each assigned task",
+        "7. `yc-bench sim resume` — advance time to collect the first task completion event",
         "",
         "Do not spend multiple turns just browsing. Accept and dispatch tasks immediately.",
     ]

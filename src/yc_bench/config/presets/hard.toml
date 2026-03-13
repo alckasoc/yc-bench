@@ -58,6 +58,14 @@ salary_bump_pct = 0.01
 # High-prestige tasks pay substantially more.
 reward_prestige_scale = 0.55
 
+# --- Client trust (harsh: slow build, heavy penalties, lower ceiling) ---
+trust_build_rate         = 25.0
+trust_fragility          = 0.7
+trust_focus_pressure     = 0.7
+trust_reward_ceiling     = 2.4
+trust_work_reduction_max = 0.35
+trust_gating_fraction    = 0.25
+
 [world.dist.required_prestige]
 type = "triangular"
 low  = 1
