@@ -2,64 +2,55 @@
 from __future__ import annotations
 
 SYSTEM_PROMPT = """\
-You are the autonomous CEO of an AI startup in a deterministic business simulation. \
-Your goal is to maximize company prestige and funds over the simulation horizon while avoiding bankruptcy.
+You are the CEO of a startup in a business simulation. Maximize funds and prestige while avoiding bankruptcy.
 
-## How It Works
+All actions use `yc-bench` CLI commands via `run_command`. All return JSON.
 
-- All actions are performed via the `run_command` tool, which executes `yc-bench` CLI commands.
-- All commands return JSON. Parse the output to make decisions.
-- Simulation progression and event processing are managed by the benchmark runtime.
-- Business hours are weekdays 09:00-18:00. Nights, weekends, and Feb 29 are skipped.
-- Payroll is deducted automatically on the first business day of each month.
-- If funds go below zero after any event or payroll, the company goes bankrupt and the run ends.
+## Core Workflow (repeat every turn)
 
-## Available Commands
+**You must always have active tasks running. Every turn, follow this loop:**
+
+1. `yc-bench market browse` — pick a task
+2. `yc-bench task accept --task-id Task-42` — accept it
+3. `yc-bench task assign --task-id Task-42 --employees Emp_1,Emp_4,Emp_7` — assign employees (check `employee list` for skill rates)
+4. `yc-bench task dispatch --task-id Task-42` — start work
+5. `yc-bench sim resume` — advance to next event (requires active tasks)
+
+Run multiple tasks concurrently when possible. Accept → assign → dispatch a second task before calling sim resume.
+
+**Use `yc-bench scratchpad write`** to save strategy notes — your conversation history is truncated after 20 turns, but scratchpad persists in the system prompt. Write rules, not events (e.g. "assign Emp_1,Emp_4,Emp_7 for inference tasks" not "Task-42 failed").
+
+## Commands
 
 ### Observe
-- `yc-bench company status` — funds, prestige, employee count, payroll, bankruptcy risk
-- `yc-bench employee list` — list all employees with IDs, tier (junior/mid/senior), salaries, and current assignments
-- `yc-bench market browse [--domain X] [--required-prestige-lte N] [--reward-min-cents N] [--limit N] [--offset N]` — browse available tasks (default limit 50; the response includes a `total` field — if total > 50, paginate with --offset to see more). Tasks show `client_name` and `required_trust`.
-- `yc-bench task list [--status X]` — list your tasks (planned, active, completed, cancelled)
-- `yc-bench task inspect --task-id <UUID>` — detailed task info (requirements, assignments, progress, client, trust requirement)
-- `yc-bench client list` — show all clients with current trust levels
-- `yc-bench finance ledger [--from MM/DD/YYYY] [--to MM/DD/YYYY] [--category X]` — financial history
-- `yc-bench report monthly [--from-month YYYY-MM] [--to-month YYYY-MM]` — monthly P&L
-- `yc-bench scratchpad read` — read your persistent notes
-
-### Memory (scratchpad)
-- `yc-bench scratchpad write --content "text"` — overwrite scratchpad with new notes
-- `yc-bench scratchpad append --content "text"` — append a line to existing notes
-- `yc-bench scratchpad clear` — erase all notes
-- Use the scratchpad to store key decisions, task deadlines, employee assignments, and strategy notes. Context is periodically truncated — anything important should be written here.
+- `yc-bench company status` — funds, prestige, payroll
+- `yc-bench employee list` — employees with skill rates per domain
+- `yc-bench market browse [--domain X] [--reward-min-cents N] [--limit N]` — available tasks
+- `yc-bench task list [--status X]` — your tasks
+- `yc-bench task inspect --task-id Task-42` — task details
+- `yc-bench client list` — clients with trust levels
+- `yc-bench client history` — per-client success/failure rates
+- `yc-bench finance ledger` — financial history
+- `yc-bench scratchpad read` — your persistent notes
 
 ### Act
-- `yc-bench task accept --task-id <UUID>` — accept a market task (sets deadline, generates replacement)
-- `yc-bench task assign --task-id <UUID> --employee-id <UUID>` — assign employee to task
-- `yc-bench task dispatch --task-id <UUID>` — start work on a planned task (must have assignments)
-- `yc-bench task cancel --task-id <UUID> --reason "text"` — cancel a task (prestige penalty: 1.2x reward delta)
-- `yc-bench sim resume` — advance simulation to the next checkpoint event and return wake events
+- `yc-bench task accept --task-id Task-42` — accept from market
+- `yc-bench task assign --task-id Task-42 --employees Emp_1,Emp_4,Emp_7` — assign employees (comma-separated)
+- `yc-bench task dispatch --task-id Task-42` — start work (must assign first)
+- `yc-bench task cancel --task-id Task-42 --reason "text"` — cancel (prestige penalty)
+- `yc-bench sim resume` — advance time
+- `yc-bench scratchpad write --content "text"` — save notes
+- `yc-bench scratchpad append --content "text"` — append notes
 
-## Key Rules
+## Key Mechanics
 
-- Task completion at or before deadline = success (reward funds + prestige + skill boost + client trust gain)
-- Task completion after deadline = failure (0.8x prestige penalty, no reward, trust penalty)
-- Task cancellation = 1.2x prestige penalty per domain + trust penalty (worse than failure)
-- Employee throughput = base_rate / number_of_active_tasks_assigned
-- Time advances only when you run `yc-bench sim resume` — it jumps to the next event (task milestone at 25/50/75%, task completion, or monthly payroll). **Warning**: calling `sim resume` with no active tasks just skips to the next payroll, burning runway with zero revenue.
-- Prestige is clamped [1, 10]. Funds are in cents.
-
-## Client Trust
-
-- Each task is offered by a specific **client** (e.g. "Nexus AI", "Vertex Labs").
-- Each client has **specialty domains** (e.g. "research", "training"). Tasks from a client are biased toward their specialties.
-- Use `yc-bench client list` to see each client's specialties and current trust level.
-
-### Mechanics
-- Completing tasks for a client builds **trust** [0.0–5.0]. Trust gains diminish as you approach max.
-- Trusted clients require less work (up to 35% reduction at max trust).
-- Some tasks require minimum trust to accept (required_trust 1-4).
-- Trust decays daily. Task failure and cancellation reduce trust.
+- **Salary bumps**: completed tasks raise salary for every assigned employee. Assigning all 8 to every task compounds payroll until it exceeds revenue — assign 3-4 domain specialists instead.
+- **Throughput split**: employees on multiple active tasks split their rate (rate/sqrt(N)). Two tasks run at ~71% each.
+- **Deadlines**: success before deadline = reward + prestige. Failure = prestige penalty, no reward.
+- **Trust**: completing tasks for a client builds trust → less work per task, access to gated tasks. Working for one client erodes trust with others.
+- **Not all clients are reliable.** Check `client history` for failure patterns.
+- **Payroll**: deducted monthly. Funds < 0 = bankruptcy.
+- Prestige grows per domain. Higher prestige unlocks better-paying tasks.
 """
 
 
@@ -74,6 +65,7 @@ def build_turn_context(
     monthly_payroll_cents: int,
     bankrupt: bool,
     last_wake_events: list | None = None,
+    scratchpad: str | None = None,
 ) -> str:
     """Build per-turn context message injected as user input."""
     runway_months = (
@@ -82,6 +74,9 @@ def build_turn_context(
         else None
     )
     runway_str = f"~{runway_months} months" if runway_months is not None else "∞ (no payroll)"
+
+    history_limit = 20
+    turns_until_truncation = max(0, history_limit - turn_number)
 
     parts = [
         f"## Turn {turn_number} — Simulation State",
@@ -93,6 +88,7 @@ def build_turn_context(
         f"- **Employees**: {employee_count}",
         f"- **Active tasks**: {active_tasks}",
         f"- **Planned tasks**: {planned_tasks}",
+        f"- **Memory**: oldest messages drop after turn 20 ({turns_until_truncation} turns left). Use scratchpad to save important observations.",
     ]
 
     if bankrupt:
@@ -104,11 +100,27 @@ def build_turn_context(
             ev_type = ev.get("type", "unknown")
             if ev_type == "task_completed":
                 success = ev.get("success", False)
-                tid = ev.get("task_id", "?")
-                parts.append(f"- Task {tid}: {'SUCCESS' if success else 'FAILED'}")
+                title = ev.get("task_title") or ev.get("task_id", "?")
+                client = ev.get("client_name", "")
+                client_str = f" (client: {client})" if client else ""
+                funds = ev.get("funds_delta", 0)
+                funds_str = f" +${funds/100:,.0f}" if success and funds else ""
+                margin = ev.get("deadline_margin", "")
+                margin_str = f" [{margin}]" if margin else ""
+                n_emp = ev.get("employees_assigned", 0)
+                bump = ev.get("salary_bump_total_cents", 0)
+                bump_str = f" | {n_emp} employees, +${bump/100:,.0f}/mo payroll" if bump > 0 else f" | {n_emp} employees" if n_emp else ""
+                if success:
+                    parts.append(f"- {title}{client_str}: SUCCESS{funds_str}{margin_str}{bump_str}")
+                else:
+                    parts.append(f"- {title}{client_str}: FAILED — missed deadline{margin_str}, no reward")
             elif ev_type == "task_half":
                 pct = ev.get("milestone_pct", "?")
                 parts.append(f"- Task {ev.get('task_id', '?')}: {pct}% progress reached")
+            elif ev_type == "payment_dispute":
+                clawback = ev.get("clawback_cents", 0)
+                client_name = ev.get("client_name", "unknown")
+                parts.append(f"- PAYMENT DISPUTE from {client_name}: -${clawback / 100:,.2f} clawed back")
             elif ev_type == "horizon_end":
                 parts.append("- **Horizon end reached. Simulation complete.**")
             elif ev_type == "bankruptcy":
@@ -131,6 +143,9 @@ def build_turn_context(
     else:
         parts.append("\nDecide your next actions. Use `run_command` to execute CLI commands.")
 
+    # Scratchpad is injected in the system prompt, not here (avoids duplication
+    # across the 20-turn history window).
+
     return "\n".join(parts)
 
 
@@ -144,6 +159,7 @@ def build_initial_user_prompt(
     monthly_payroll_cents: int,
     bankrupt: bool,
     episode: int = 1,
+    scratchpad: str | None = None,
 ) -> str:
     """Build the one-time initial user message at run start."""
     runway_months = (
@@ -182,16 +198,16 @@ def build_initial_user_prompt(
         f"- planned_tasks: {planned_tasks}",
         "",
         "**Your immediate priority**: generate revenue before payroll drains your runway.",
-        "You MUST complete these steps now (multiple commands per turn are fine):",
-        "1. `yc-bench company status` — check your current prestige levels",
-        "2. `yc-bench market browse` — find tasks you can accept (use `--required-prestige-lte N` matching your prestige)",
-        "3. `yc-bench task accept --task-id <UUID>` — accept 2-3 suitable tasks",
-        "4. `yc-bench employee list` — get employee IDs",
-        "5. `yc-bench task assign --task-id <UUID> --employee-id <UUID>` — assign employees",
-        "6. `yc-bench task dispatch --task-id <UUID>` — start work on each assigned task",
-        "7. `yc-bench sim resume` — advance time to collect the first task completion event",
+        "Complete these steps now (multiple commands per turn are fine):",
+        "1. `yc-bench market browse` — see available tasks",
+        "2. `yc-bench task accept --task-id Task-42` — accept a task",
+        "3. `yc-bench task assign-all --task-id Task-42` — assign employees (or use `task assign` to pick individuals)",
+        "4. `yc-bench task dispatch --task-id Task-42` — start work",
+        "5. `yc-bench sim resume` — advance time",
         "",
-        "Do not spend multiple turns just browsing. Accept and dispatch tasks immediately.",
+        "**IMPORTANT**: Check each command's result before proceeding to the next.",
+        "If `task accept` fails (trust or prestige too low), try a different task.",
+        "Do NOT call `sim resume` unless you have at least one active task — it will skip forward with zero revenue.",
     ])
     if bankrupt:
         lines.append("WARNING: company is already bankrupt at initialization.")
