@@ -45,14 +45,6 @@ echo "Seeds: $SEEDS"
 echo "Models: ${#ALL_MODELS[@]}"
 echo ""
 
-# Run greedy bot baseline first
-echo "--- Running greedy bot baseline ---"
-for seed in $SEEDS; do
-    echo "  greedy_bot | $CONFIG seed=$seed"
-    uv run python scripts/bot_runner.py --bot greedy --config "$CONFIG" --seed "$seed"
-done
-echo ""
-
 # Run all LLM models
 for model in "${ALL_MODELS[@]}"; do
     for seed in $SEEDS; do
