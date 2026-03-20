@@ -1,118 +1,75 @@
-# Client Trust System
+# Client Trust & Loyalty
 
-**Location**: `services/generate_clients.py`, `services/generate_tasks.py`, `core/handlers/task_complete.py`, `cli/task_commands.py`
+## The Big Idea
 
-## Overview
+Every client has a **hidden loyalty score** the agent can't see. Some clients are loyal (investing in them pays off), some are adversarial "RATs" (investing in them backfires). The agent has to figure out which is which from observed behavior — deadline failures from scope creep, not explicit labels.
 
-Trust is the second progression axis alongside prestige. Prestige gates task access; trust determines profitability. Every task belongs to a client. Building trust increases payouts and reduces work, rewarding focused relationship-building.
+This tests:
 
-## Configuration
+1. **Can the agent spot patterns?** RATs look normal. The only signal is that tasks from them fail deadlines disproportionately.
+2. **Can the agent cut losses?** Dropping a RAT means lost trust investment. Keeping one means repeated deadline failures and prestige loss.
 
-The trust system is controlled by **7 intuitive knobs** in `WorldConfig`. All internal parameters are derived automatically.
+## How Trust Works
 
-| Knob | Default | Meaning |
-|------|---------|---------|
-| `num_clients` | 8 | Number of clients in the game |
-| `trust_max` | 5.0 | Maximum trust level |
-| `trust_build_rate` | 20.0 | ~tasks to reach 80% max trust with one client |
-| `trust_fragility` | 0.5 | 0–1: how punishing failures/inactivity are |
-| `trust_focus_pressure` | 0.5 | 0–1: penalty for spreading work across clients |
-| `trust_reward_ceiling` | 2.6 | Payout multiplier a Premium client gives at max trust |
-| `trust_work_reduction_max` | 0.40 | Max work reduction at max trust (40%) |
-| `trust_gating_fraction` | 0.20 | Fraction of tasks that require trust (~20%) |
+Every client starts at trust 0. Completing tasks builds trust (0-5 scale). Trust gives two benefits:
 
-### Derivation
+- **Work reduction**: Up to 35-40% less work per task at max trust (trusted clients give clearer specs)
+- **Gated tasks**: ~20-30% of high-reward tasks require minimum trust to accept
 
-These knobs derive all internal parameters via `_derive_trust_params()`:
+Trust decays daily and drops on failure/cancellation. Working for Client A erodes trust with all other clients (cross-client decay), so you can't maintain trust with everyone — you have to pick 2-3 clients to focus on.
 
-```
-gain_base           = trust_max × 1.6 / trust_build_rate
-fail_penalty        = fragility × 0.6
-cancel_penalty      = fragility × 1.0
-decay_per_day       = fragility × 0.03
-cross_client_decay  = focus_pressure × 0.06
-reward_scale        = (reward_ceiling - 0.50) / (1.69 × trust_max)
-reward_threshold    = 1.0 - 2 × gating_fraction
-reward_ramp         = 2 × gating_fraction
-```
+Note: Trust does NOT affect task reward amounts. Reward multiplier was removed — only work reduction remains. The revenue benefit of trust is indirect: faster task completion → more tasks per month → more revenue.
 
-## Client Generation
+## How Loyalty Works
 
-At world-seeding time, `num_clients` clients are generated with:
-- **Reward multiplier**: `triangular(0.7, 2.5, mode=1.0)` — hidden from agent
-- **Tier** (visible): Standard `[0.7, 1.0)`, Premium `[1.0, 1.7)`, Enterprise `[1.7, 2.5]`
-- **Specialties**: 1 domain (60%) or 2 domains (40%)
+At world generation, a fixed number of RATs are guaranteed: `round(num_clients × loyalty_rat_fraction)`, minimum 1. RATs get loyalty in [-1.0, -0.3], non-RATs get loyalty in [-0.3, 1.0].
 
-## Task Domain Bias
+- **Loyal** (> 0.3): Trust investment pays off via work reduction.
+- **Neutral** (-0.3 to 0.3): No special effects.
+- **RAT** (< -0.3): Adversarial. Looks normal, causes scope creep on accepted tasks.
 
-First domain pick has 70% chance of matching client specialty. Remaining domains uniform random.
+Employees and clients use a **fixed world seed** (seed=1) so the same clients (including the same RATs) appear across all run seeds. Only task generation varies by seed.
 
-## Trust Gating
+The agent never sees loyalty scores. It only sees: client name, tier, specialties, trust level.
 
-High-reward tasks may require trust:
+## What RATs Do: Scope Creep
+
+When the agent accepts a task from a RAT client, the **actual work required is secretly inflated** after acceptance — but the deadline is calculated from the original (smaller) amount. The task looks completable when browsing but isn't.
 
 ```
-reward_frac = (reward - floor) / (ceiling - floor)
-trust_prob  = max(0, (reward_frac - threshold) / ramp)
-level       = clamp(1 + reward_frac × 3, 1, 4)
+inflation = scope_creep_max × |loyalty|
+inflation = max(1.3, inflation)  # minimum 130% inflation ensures deadline failure
+for each requirement:
+    required_qty *= (1 + inflation)
 ```
 
-Trust-gated tasks get a 15% reward boost per required trust level.
+- **Scope creep formula**: `scope_creep_max = loyalty_severity × 1.0`
+- **At medium (severity=1.0)**: A RAT with loyalty=-0.7 inflates work by 130% (minimum floor)
+- **Effect**: RAT tasks always miss deadlines → zero reward + prestige penalty
 
-**Why**: Clients reserve best projects for proven vendors.
+Scope creep activates from the first task (no trust threshold needed). The agent can detect it by noticing that tasks from certain clients consistently fail despite looking feasible in the market.
 
-## Trust Reward Formula (at task accept)
+Payment disputes were removed — scope creep alone provides sufficient RAT damage.
 
-```
-trust_multiplier = 0.50 + client_mult² × reward_scale × trust² / trust_max
-actual_reward    = listed_reward × trust_multiplier
-```
+## How the Agent Can Detect RATs
 
-At trust 0, everyone gets 50% of listed reward. At max trust:
+The agent has one tool: `yc-bench client history`. This shows per-client:
 
-| Tier | mult | multiplier |
-|------|------|-----------|
-| Standard | 0.85 | 1.40× |
-| Premium | 1.30 | 2.60× |
-| Enterprise | 2.00 | 5.50× |
+- Tasks succeeded and failed count
+- `failure_rate_pct` per client
 
-**Why**: Quadratic on both mult and trust creates dramatic tier separation at high trust. Enterprise is worse than Standard at trust 0 — a genuine investment gamble.
+An agent that periodically checks history will notice a client whose tasks fail deadlines more than others (scope creep signal). An agent that never checks will keep getting exploited.
 
-## Work Reduction (at task accept)
+Additionally, the agent can observe via `task inspect` that the `required_qty` is larger than what was listed in `market browse` — a direct scope creep signal if the agent compares pre-accept and post-accept values.
 
-```
-work_reduction = trust_work_reduction_max × trust / trust_max
-required_qty  *= (1 - work_reduction)
-```
+## Config Knobs
 
-**Why**: Trusted clients give clearer specs. Creates virtuous cycle: trust → less work → faster completion → more tasks → more trust.
+| Knob                   | Medium | Hard | Nightmare |
+| ---------------------- | ------ | ---- | --------- |
+| `loyalty_rat_fraction` | 0.20   | 0.20 | 0.25      |
+| `loyalty_severity`     | 1.0    | 0.7  | 0.9       |
+| `loyalty_reveal_trust` | 0.0    | 1.5  | 1.0       |
 
-## Trust Gain (task success)
+Derived from severity:
 
-```
-gain = gain_base × (1 - trust/trust_max) ^ 1.5
-```
-
-Diminishing returns: ~0.40/task at trust 0, ~0.07/task at trust 4.
-
-## Trust Loss
-
-| Event | Penalty |
-|-------|---------|
-| Task failure | `fragility × 0.6` (default 0.3) |
-| Task cancel | `fragility × 1.0` (default 0.5) |
-
-## Trust Decay
-
-- **Daily**: `fragility × 0.03` per day (default 0.015)
-- **Cross-client**: `focus_pressure × 0.06` per task for other client (default 0.03)
-
-**Why**: Cross-client decay penalizes scattering and rewards focusing on 2–3 clients.
-
-## Sim Resume When Idle
-
-`sim resume` is allowed even with no active tasks — time moves forward regardless. Calling it while idle advances to the next payroll event, burning runway with zero revenue. The prompt warns the agent not to do this, but doesn't prevent it. If the agent ignores the warning and burns payroll, that's a valid failure mode.
-
-## Agent Visibility
-
-Visible: client name, trust_level, tier, specialties. Not visible: exact multiplier, formulas, decay rates.
+- `scope_creep_max = severity × 1.0`

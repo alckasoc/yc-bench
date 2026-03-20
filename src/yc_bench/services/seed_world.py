@@ -26,8 +26,8 @@ class SeedWorldRequest:
     horizon_years: int
     employee_count: int
     market_task_count: int
+    cfg: WorldConfig
     start_date: datetime | None = None
-    cfg: WorldConfig = field(default_factory=WorldConfig)
 
 
 @dataclass(frozen=True)
@@ -58,8 +58,11 @@ def _seed_company_prestige(db, company, cfg):
         )
 
 
+_FIXED_WORLD_SEED = 1  # employees + clients identical across all run seeds
+
+
 def _seed_employees(db, company, req):
-    generated = generate_employees(run_seed=req.run_seed, count=req.employee_count, cfg=req.cfg)
+    generated = generate_employees(run_seed=_FIXED_WORLD_SEED, count=req.employee_count, cfg=req.cfg)
     for emp in generated:
         employee = Employee(
             id=uuid4(),
@@ -83,11 +86,12 @@ def _seed_employees(db, company, req):
 
 def _seed_clients(db, company, req):
     """Create Client rows and ClientTrust rows (all starting at 0.0)."""
-    generated = generate_clients(run_seed=req.run_seed, count=req.cfg.num_clients, cfg=req.cfg)
+    generated = generate_clients(run_seed=_FIXED_WORLD_SEED, count=req.cfg.num_clients, cfg=req.cfg)
     clients = []
     for gc in generated:
         client = Client(id=uuid4(), name=gc.name, reward_multiplier=gc.reward_multiplier,
-                       tier=gc.tier, specialty_domains=gc.specialty_domains)
+                       tier=gc.tier, specialty_domains=gc.specialty_domains,
+                       loyalty=gc.loyalty)
         db.add(client)
         clients.append(client)
         db.add(ClientTrust(
@@ -100,10 +104,12 @@ def _seed_clients(db, company, req):
 
 
 def _seed_market_tasks(db, company, req, clients):
-    # Build specialty list indexed by client order for domain-biased task generation
+    # Build specialty list and reward multipliers indexed by client order
     client_specialties = [c.specialty_domains or [] for c in clients] if clients else None
+    client_reward_mults = [c.reward_multiplier for c in clients] if clients else None
     generated = generate_tasks(run_seed=req.run_seed, count=req.market_task_count, cfg=req.cfg,
-                               client_specialties=client_specialties)
+                               client_specialties=client_specialties,
+                               client_reward_mults=client_reward_mults)
     for task in generated:
         client = clients[task.client_index % len(clients)] if clients else None
         task_row = Task(

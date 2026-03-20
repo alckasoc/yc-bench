@@ -32,6 +32,8 @@ agent.md
 # Benchmark runtime outputs
 /db/
 /logs/
+/plots/
+/results/
 
 # Claude session context — local only
 CLAUDE.md
