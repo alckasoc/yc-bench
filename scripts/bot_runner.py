@@ -327,17 +327,24 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
                     TaskRequirement.task_id == task.id
                 ).all()
 
-                # Apply trust work reduction (no reward multiplier)
+                # Check if client is a RAT
+                is_rat = False
                 if task.client_id is not None:
-                    from yc_bench.db.models.client import ClientTrust
-                    ct = db.query(ClientTrust).filter(
-                        ClientTrust.company_id == company_id,
-                        ClientTrust.client_id == task.client_id,
-                    ).one_or_none()
-                    trust_level = float(ct.trust_level) if ct else 0.0
-                    work_reduction = world_cfg.trust_work_reduction_max * (trust_level / world_cfg.trust_max)
-                    for r in reqs:
-                        r.required_qty = int(float(r.required_qty) * (1 - work_reduction))
+                    from yc_bench.db.models.client import Client as ClientModel, ClientTrust
+                    client_row = db.query(ClientModel).filter(ClientModel.id == task.client_id).one_or_none()
+                    if client_row and client_row.loyalty < -0.3:
+                        is_rat = True
+
+                    # Apply trust work reduction (only for non-RAT clients)
+                    if not is_rat:
+                        ct = db.query(ClientTrust).filter(
+                            ClientTrust.company_id == company_id,
+                            ClientTrust.client_id == task.client_id,
+                        ).one_or_none()
+                        trust_level = float(ct.trust_level) if ct else 0.0
+                        work_reduction = world_cfg.trust_work_reduction_max * (trust_level / world_cfg.trust_max)
+                        for r in reqs:
+                            r.required_qty = max(200, int(float(r.required_qty) * (1 - work_reduction)))
 
                 max_domain_qty = max(float(r.required_qty) for r in reqs)
 
@@ -345,6 +352,16 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
                 task.company_id = company_id
                 task.accepted_at = sim_state.sim_time
                 task.deadline = _compute_deadline(sim_state.sim_time, max_domain_qty, world_cfg)
+                task.advertised_reward_cents = task.reward_funds_cents
+
+                # Scope creep: RAT clients inflate required_qty after accept
+                if is_rat:
+                    intensity = abs(client_row.loyalty)
+                    inflation = world_cfg.scope_creep_max * intensity
+                    inflation = max(3.0, inflation)
+                    for r in reqs:
+                        inflated = float(r.required_qty) * (1 + inflation)
+                        r.required_qty = int(min(25000, max(200, inflated)))
 
                 # Generate replacement
                 counter = sim_state.replenish_counter
