@@ -118,6 +118,7 @@ def _seed_market_tasks(db, company, req, clients):
             client_id=client.id if client else None,
             status=TaskStatus.MARKET,
             title=task.title,
+            description=task.description,
             required_prestige=task.required_prestige,
             reward_funds_cents=task.reward_funds_cents,
             reward_prestige_delta=task.reward_prestige_delta,

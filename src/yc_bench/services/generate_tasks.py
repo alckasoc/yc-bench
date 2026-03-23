@@ -27,6 +27,7 @@ class GeneratedTask:
     requirements: dict[str, int]
     client_index: int = 0
     required_trust: int = 0
+    description: str = ""
 
 
 # First 10 market tasks are forced to prestige 1 to guarantee a
@@ -131,6 +132,10 @@ def _make_task(rng, cfg, prestige, serial, requirements, client_index=0):
     required_trust = _required_trust_from_reward(rng, cfg, reward)
     if required_trust > 0:
         reward = int(reward * (1.0 + cfg.trust_gated_reward_boost * required_trust))
+    # Generate NL description from the primary domain
+    from .task_descriptions import generate_task_description
+    primary_domain = next(iter(requirements)) if requirements else "research"
+    description = generate_task_description(rng, primary_domain)
     return GeneratedTask(
         title=f"Task-{serial}",
         required_prestige=prestige,
@@ -147,6 +152,7 @@ def _make_task(rng, cfg, prestige, serial, requirements, client_index=0):
         requirements=requirements,
         client_index=client_index,
         required_trust=required_trust,
+        description=description,
     )
 
 
