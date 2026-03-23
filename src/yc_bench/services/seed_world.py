@@ -110,8 +110,15 @@ def _seed_market_tasks(db, company, req, clients):
     generated = generate_tasks(run_seed=req.run_seed, count=req.market_task_count, cfg=req.cfg,
                                client_specialties=client_specialties,
                                client_reward_mults=client_reward_mults)
+    from .client_messages import generate_client_message
+    from .rng import RngStreams
+    msg_streams = RngStreams(req.run_seed)
+
     for slot_idx, task in enumerate(generated):
         client = clients[task.client_index % len(clients)] if clients else None
+        is_rat = client is not None and client.loyalty < -0.3
+        msg_rng = msg_streams.stream(f"client_msg_{slot_idx}")
+        client_message = generate_client_message(msg_rng, is_rat)
         task_row = Task(
             id=uuid4(),
             company_id=None,
@@ -119,6 +126,7 @@ def _seed_market_tasks(db, company, req, clients):
             status=TaskStatus.MARKET,
             title=task.title,
             description=task.description,
+            client_message=client_message,
             required_prestige=task.required_prestige,
             reward_funds_cents=task.reward_funds_cents,
             reward_prestige_delta=task.reward_prestige_delta,

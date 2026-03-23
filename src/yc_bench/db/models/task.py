@@ -55,6 +55,10 @@ class Task(Base):
         String(2000),
         nullable=True,
     )
+    client_message = mapped_column(
+        String(2000),
+        nullable=True,
+    )
     required_prestige = mapped_column(
         Integer,
         nullable=False,

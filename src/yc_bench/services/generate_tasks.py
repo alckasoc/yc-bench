@@ -28,6 +28,7 @@ class GeneratedTask:
     client_index: int = 0
     required_trust: int = 0
     description: str = ""
+    client_message: str = ""
 
 
 # First 10 market tasks are forced to prestige 1 to guarantee a

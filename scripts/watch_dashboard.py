@@ -25,6 +25,8 @@ MODEL_COLORS = {
     "gemini-3.1-pro-preview": "#22cc44",
     "gemini-3-flash-preview": "#b197fc",
     "claude-sonnet-4-6": "#ff69b4",
+    "fair_heuristic": "#ff4b6e",
+    "greedy_bot": "#e05555",
 }
 
 st.set_page_config(page_title="YC-Bench", layout="wide", page_icon="📊")
@@ -43,6 +45,13 @@ def _model_color(label: str) -> str:
 
 
 def _parse_db_stem(stem: str) -> tuple[str, int, str]:
+    # Handle fair_heuristic_medium_1 format
+    if stem.startswith("fair_heuristic_"):
+        try:
+            seed = int(stem.split("_")[-1])
+            return "medium", seed, "fair_heuristic"
+        except ValueError:
+            return stem, 0, "fair_heuristic"
     parts = stem.split("_", 2)
     if len(parts) < 3:
         return stem, 0, stem

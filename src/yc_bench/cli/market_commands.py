@@ -109,6 +109,7 @@ def market_browse(
             results.append({
                 "task_id": task.title,
                 "description": task.description or "",
+                "client_message": task.client_message or "",
                 "client_name": client_name,
                 "required_prestige": task.required_prestige,
                 "required_trust": task.required_trust,

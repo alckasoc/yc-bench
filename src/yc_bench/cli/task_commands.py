@@ -164,6 +164,13 @@ def task_accept(
         replacement_client = clients[replacement.client_index % len(clients)] if clients else None
         replacement_client_id = replacement_client.id if replacement_client else None
 
+        # Generate client message for replacement
+        _rep_is_rat = replacement_client is not None and hasattr(replacement_client, 'loyalty') and replacement_client.loyalty < -0.3
+        from ..services.client_messages import generate_client_message
+        from ..services.rng import RngStreams
+        _msg_rng = RngStreams(sim_state.run_seed).stream(f"client_msg_rep_{slot}_{generation}")
+        _rep_client_msg = generate_client_message(_msg_rng, _rep_is_rat)
+
         replacement_row = Task(
             id=uuid4(),
             company_id=None,
@@ -171,6 +178,7 @@ def task_accept(
             status=TaskStatus.MARKET,
             title=replacement.title,
             description=replacement.description,
+            client_message=_rep_client_msg,
             required_prestige=replacement.required_prestige,
             reward_funds_cents=replacement.reward_funds_cents,
             reward_prestige_delta=replacement.reward_prestige_delta,
@@ -487,6 +495,7 @@ def task_inspect(
             "task_id": task.title,
             "title": task.title,
             "description": task.description or "",
+            "client_message": task.client_message or "",
             "status": task.status.value,
             "client_name": client_name,
             "required_prestige": task.required_prestige,
@@ -498,7 +507,7 @@ def task_inspect(
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             "success": task.success,
             "progress_pct": round(progress_pct, 2),
-            "requirements": requirements,
+            "requirements": requirements if task.status != TaskStatus.MARKET else [],
             "assignments": assignments,
         })
 
