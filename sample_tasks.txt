@@ -1,0 +1,84 @@
+================================================================================
+SAMPLE TASKS — YC-Bench (as seen by the LLM agent)
+================================================================================
+
+--------------------------------------------------------------------------------
+RAT CLIENT TASKS (adversarial — scope creep will cause deadline failure)
+--------------------------------------------------------------------------------
+
+Task ID: Task-59
+Client: Equinox Labs
+Reward: $33,829
+
+Description:
+Create an inference gateway that routes requests to different retrieval model versions based on noisy labels. Need low-overhead routing logic.
+
+Client Message:
+Looking for a reliable partner after some disappointing experiences with other firms. The project is straightforward on paper, but our last two attempts stalled due to unforeseen complexity. We believe fresh eyes will make the difference.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+Task ID: Task-83
+Client: Equinox Labs
+Reward: $32,421
+
+Description:
+Investigate why our generation system performance degrades on class imbalance. Needs deep analysis of failure modes, hypothesis testing, and development of improved algorithms.
+
+Client Message:
+We need to replace a system that's been causing issues for months. Our internal team started this work but got pulled onto other priorities. The requirements doc is thorough, though some edge cases may surface during implementation.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+Task ID: Task-167
+Client: Equinox Labs
+Reward: $31,275
+
+Description:
+Create a prompt engineering system for recommendation. Must handle variable load, graceful degradation, and A/B testing of model versions.
+
+Client Message:
+We need to replace a system that's been causing issues for months. Our internal team started this work but got pulled onto other priorities. The requirements doc is thorough, though some edge cases may surface during implementation.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+--------------------------------------------------------------------------------
+GOOD CLIENT TASKS (reliable — will complete normally)
+--------------------------------------------------------------------------------
+
+Task ID: Task-127
+Client: Helix Systems
+Reward: $38,027
+
+Description:
+Design a novel mixture-of-experts architecture for recommendation. Requires literature review, experimentation with different approaches, and rigorous benchmarking against baselines.
+
+Client Message:
+We've been running this type of project quarterly for two years. The process is well-established and requirements don't change. Quick onboarding, clear success criteria, reliable payment.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+Task ID: Task-121
+Client: Helix Systems
+Reward: $34,992
+
+Description:
+Explore active learning methods for entity extraction. We've tried conventional approaches without success — looking for fresh research perspectives.
+
+Client Message:
+Established project template that we run regularly. No experimentation needed — we know exactly what we want. Fast turnaround expected given the clear scope. We pay within 5 business days of delivery.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+Task ID: Task-80
+Client: Cortex Intelligence
+Reward: $34,489
+
+Description:
+Build an automated data validation framework for IoT sensor networks. Must catch schema changes, distribution shifts, and missing values.
+
+Client Message:
+Standard project with clear requirements. We've done similar work with other teams successfully. Timeline is comfortable and requirements are final. Looking forward to a smooth collaboration.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+

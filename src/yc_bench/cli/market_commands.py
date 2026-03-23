@@ -108,13 +108,13 @@ def market_browse(
 
             results.append({
                 "task_id": task.title,
-                "description": task.description or "",
-                "client_message": task.client_message or "",
                 "client_name": client_name,
                 "required_prestige": task.required_prestige,
                 "required_trust": task.required_trust,
                 "reward_funds_cents": task.reward_funds_cents,
-                "reward_display": f"${task.reward_funds_cents / 100:,.0f}",
+                "reward_prestige_delta": float(task.reward_prestige_delta),
+                "skill_boost_pct": float(task.skill_boost_pct),
+                "requirements": requirements,
             })
 
             if len(results) >= limit:

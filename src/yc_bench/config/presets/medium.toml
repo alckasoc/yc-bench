@@ -53,7 +53,7 @@ trust_gated_reward_boost = 0.0    # no reward distortion
 # --- Client loyalty ---
 loyalty_rat_fraction     = 0.35
 loyalty_severity         = 1.0
-loyalty_reveal_trust     = 0.0
+loyalty_reveal_trust     = 2.0    # RATs behave normally until trust 2.0, then betray
 
 task_progress_milestones = []
 

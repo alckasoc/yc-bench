@@ -136,7 +136,8 @@ def _make_task(rng, cfg, prestige, serial, requirements, client_index=0):
     # Generate NL description from the primary domain
     from .task_descriptions import generate_task_description
     primary_domain = next(iter(requirements)) if requirements else "research"
-    description = generate_task_description(rng, primary_domain)
+    primary_qty = next(iter(requirements.values())) if requirements else 800
+    description = generate_task_description(rng, primary_domain, qty=primary_qty)
     return GeneratedTask(
         title=f"Task-{serial}",
         required_prestige=prestige,

@@ -23,16 +23,20 @@ Run multiple tasks concurrently when possible. Accept → assign → dispatch a 
 ## Commands
 
 ### Observe
+- `yc-bench company status` — funds, prestige, payroll
 - `yc-bench employee list` — employees with skill rates per domain
 - `yc-bench market browse [--domain X] [--reward-min-cents N] [--limit N]` — available tasks
 - `yc-bench task list [--status X]` — your tasks
 - `yc-bench task inspect --task-id Task-42` — task details
-- `yc-bench client history` — per-client success/failure rates and trust levels
+- `yc-bench client list` — clients with trust levels
+- `yc-bench client history` — per-client success/failure rates
+- `yc-bench finance ledger` — financial history
 
 ### Act
 - `yc-bench task accept --task-id Task-42` — accept from market
 - `yc-bench task assign --task-id Task-42 --employees Emp_1,Emp_4,Emp_7` — assign employees (comma-separated)
 - `yc-bench task dispatch --task-id Task-42` — start work (must assign first)
+- `yc-bench task cancel --task-id Task-42 --reason "text"` — cancel (prestige penalty)
 - `yc-bench sim resume` — advance time
 - `yc-bench scratchpad write --content "text"` — save notes
 - `yc-bench scratchpad append --content "text"` — append notes

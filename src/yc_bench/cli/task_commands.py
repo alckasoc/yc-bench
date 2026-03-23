@@ -86,21 +86,25 @@ def task_accept(
                     f"does not meet task requirement ({task.required_trust})."
                 )
 
-        # Check if this client is a RAT (loyalty < -0.3)
+        # Check if this client is a RAT whose betrayal has activated
+        # RATs behave normally until trust reaches loyalty_reveal_trust,
+        # then scope creep begins — creating a "trust trap".
         _cfg = _get_world_cfg()
         is_rat = False
+        rat_active = False
+        client_row = None
         if task.client_id is not None:
             client_row = db.query(Client).filter(Client.id == task.client_id).one_or_none()
             if client_row and client_row.loyalty < -0.3:
                 is_rat = True
+                rat_active = trust_level >= _cfg.loyalty_reveal_trust
 
-        # Apply trust work reduction (only for non-RAT clients —
-        # RATs don't honor trust, they scope-creep regardless).
-        if not is_rat and task.client_id is not None:
+        # Apply trust work reduction (for non-RATs, or RATs that haven't activated yet)
+        if not rat_active and task.client_id is not None:
             work_reduction = _cfg.trust_work_reduction_max * (trust_level / _cfg.trust_max)
             for r in reqs:
                 reduced = int(float(r.required_qty) * (1 - work_reduction))
-                r.required_qty = max(200, reduced)  # respect DB constraint
+                r.required_qty = max(200, reduced)
 
         # Compute deadline from current qty (after trust reduction, before scope creep)
         max_domain_qty = max(float(r.required_qty) for r in reqs)
@@ -110,8 +114,8 @@ def task_accept(
         # Store advertised reward before any dispute can alter it
         task.advertised_reward_cents = task.reward_funds_cents
 
-        # Scope creep: RAT clients inflate required_qty after accept.
-        if is_rat:
+        # Scope creep: only activates after trust reaches reveal threshold
+        if rat_active:
             intensity = abs(client_row.loyalty)
             inflation = _cfg.scope_creep_max * intensity
             inflation = max(3.0, inflation)
@@ -164,21 +168,12 @@ def task_accept(
         replacement_client = clients[replacement.client_index % len(clients)] if clients else None
         replacement_client_id = replacement_client.id if replacement_client else None
 
-        # Generate client message for replacement
-        _rep_is_rat = replacement_client is not None and hasattr(replacement_client, 'loyalty') and replacement_client.loyalty < -0.3
-        from ..services.client_messages import generate_client_message
-        from ..services.rng import RngStreams
-        _msg_rng = RngStreams(sim_state.run_seed).stream(f"client_msg_rep_{slot}_{generation}")
-        _rep_client_msg = generate_client_message(_msg_rng, _rep_is_rat)
-
         replacement_row = Task(
             id=uuid4(),
             company_id=None,
             client_id=replacement_client_id,
             status=TaskStatus.MARKET,
             title=replacement.title,
-            description=replacement.description,
-            client_message=_rep_client_msg,
             required_prestige=replacement.required_prestige,
             reward_funds_cents=replacement.reward_funds_cents,
             reward_prestige_delta=replacement.reward_prestige_delta,
@@ -494,20 +489,19 @@ def task_inspect(
         json_output({
             "task_id": task.title,
             "title": task.title,
-            "description": task.description or "",
-            "client_message": task.client_message or "",
             "status": task.status.value,
             "client_name": client_name,
             "required_prestige": task.required_prestige,
             "required_trust": task.required_trust,
             "reward_funds_cents": task.reward_funds_cents,
-            "reward_display": f"${task.reward_funds_cents / 100:,.0f}",
+            "reward_prestige_delta": float(task.reward_prestige_delta),
+            "skill_boost_pct": float(task.skill_boost_pct),
             "accepted_at": task.accepted_at.isoformat() if task.accepted_at else None,
             "deadline": task.deadline.isoformat() if task.deadline else None,
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             "success": task.success,
             "progress_pct": round(progress_pct, 2),
-            "requirements": requirements if task.status != TaskStatus.MARKET else [],
+            "requirements": requirements,
             "assignments": assignments,
         })
 

@@ -22,8 +22,8 @@ RESEARCH_TEMPLATES = [
     "Design experiments to validate our {hypothesis} about {phenomenon}. Requires careful experimental methodology and statistical rigor.",
     "Build a {model_type} that can {capability} in {context}. Needs extensive prototyping and ablation studies to find the right configuration.",
     "Analyze the {property} characteristics of {system_type} systems and propose improvements. Requires deep technical investigation.",
-    "Develop a novel loss function for {training_objective}. Current objectives produce suboptimal results on {metric}.",
-    "Investigate {failure_mode} in our {pipeline} and propose research-backed solutions. Need root cause analysis and experimental fixes.",
+    "Develop a novel optimization objective for {training_objective}. Current approaches produce suboptimal results on {metric}.",
+    "Investigate {failure_mode} in our {system} and propose research-backed solutions. Need root cause analysis and experimental fixes.",
     "Create a benchmark suite for evaluating {capability} across different {variable}. Requires careful design and baseline implementations.",
 ]
 
@@ -140,7 +140,34 @@ DOMAIN_TEMPLATES = {
 }
 
 
-def generate_task_description(rng, domain: str) -> str:
+# Complexity hints appended to descriptions based on qty range
+_COMPLEXITY_LOW = [  # qty 400-700
+    "This is a focused, well-scoped piece of work.",
+    "Expect a quick turnaround on this one — limited scope.",
+    "Relatively contained effort — the requirements are narrow and well-defined.",
+    "Small-scale project with a tight, clear scope.",
+    "Lightweight engagement — should be straightforward to deliver.",
+    "Compact scope with clear boundaries. No major unknowns.",
+]
+_COMPLEXITY_MED = [  # qty 700-1100
+    "Moderate scope and complexity — plan for a standard development cycle.",
+    "This involves a reasonable amount of work across the described areas.",
+    "Mid-sized project with some moving parts but nothing unusual.",
+    "Expect a typical engagement timeline. The scope is manageable but not trivial.",
+    "Standard-complexity project. Should be achievable with a capable team.",
+    "A solid body of work — not a quick fix, but not a marathon either.",
+]
+_COMPLEXITY_HIGH = [  # qty 1100-1500
+    "This is a substantial undertaking — expect significant time and resources.",
+    "Large-scale effort requiring deep investment from the team.",
+    "Comprehensive project with broad scope. Plan for extended timelines.",
+    "Major initiative — this will require sustained focus over an extended period.",
+    "Significant body of work. Budget extra time for the breadth of requirements.",
+    "This is one of our larger projects. Expect complexity across multiple dimensions.",
+]
+
+
+def generate_task_description(rng, domain: str, qty: float = 800) -> str:
     """Generate a natural language description for a task in the given domain."""
     templates = DOMAIN_TEMPLATES.get(domain, RESEARCH_TEMPLATES)
     template = rng.choice(templates)
@@ -154,4 +181,14 @@ def generate_task_description(rng, domain: str) -> str:
             return rng.choice(fillers)
         return match.group(0)
 
-    return re.sub(r"\{(\w+)\}", fill_slot, template)
+    desc = re.sub(r"\{(\w+)\}", fill_slot, template)
+
+    # Append complexity hint based on qty
+    if qty <= 700:
+        hint = rng.choice(_COMPLEXITY_LOW)
+    elif qty <= 1100:
+        hint = rng.choice(_COMPLEXITY_MED)
+    else:
+        hint = rng.choice(_COMPLEXITY_HIGH)
+
+    return f"{desc} {hint}"
