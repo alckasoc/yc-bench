@@ -44,7 +44,7 @@ Run multiple tasks concurrently when possible. Accept → assign → dispatch a 
 ## Key Mechanics
 
 - **Salary bumps**: completed tasks raise salary for every assigned employee. More employees assigned = higher payroll growth.
-- **Throughput split**: employees on multiple active tasks split their rate (rate/sqrt(N)). Two tasks run at ~71% each.
+- **Throughput split**: employees on multiple active tasks split their rate (rate/N). Two tasks run at 50% each.
 - **Deadlines**: success before deadline = reward + prestige. Failure = prestige penalty, no reward.
 - **Trust**: completing tasks for a client builds trust → less work per task, access to gated tasks. Working for one client erodes trust with others.
 - **Not all clients are reliable.** Check `client history` for failure patterns.

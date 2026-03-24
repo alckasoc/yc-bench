@@ -73,15 +73,13 @@ def _effective_rate_for_task_domain(*, task_id, domain, assignments,
                                     assignment_counts, base_rates):
     """Compute effective rate for one task+domain.
 
-    Throughput split uses sqrt(k) instead of k: two concurrent tasks each run at
-    1/sqrt(2) ≈ 71% speed, not 50%. This makes mild parallelism (2-3 tasks)
-    more efficient than strict sequential.
+    Throughput split is linear: an employee on k concurrent tasks contributes
+    rate/k to each. Total throughput is constant regardless of concurrency —
+    no benefit to parallelizing beyond pipeline flexibility.
 
     Brooks's Law: first 4 employees contribute full rate. Beyond that,
     additional employees contribute at 25% (overcrowding overhead).
     """
-    from math import sqrt
-
     # Collect (employee_id, effective_base) for this task, sorted best-first
     contributions = []
     for a in assignments:
@@ -91,7 +89,7 @@ def _effective_rate_for_task_domain(*, task_id, domain, assignments,
         if k <= 0:
             continue
         base = base_rates.get((a.employee_id, domain), Decimal("0"))
-        split_rate = base / Decimal(str(round(sqrt(k), 6)))
+        split_rate = base / Decimal(k)
         contributions.append(split_rate)
 
     # Sort best contributors first so they get full rate
@@ -264,14 +262,13 @@ def compute_effective_rates(db, company_id):
 
     out = []
     for req in requirements:
-        from math import sqrt
         contributions = []
         for a in assignments_by_task.get(req.task_id, []):
             k = assignment_counts.get(a.employee_id, 0)
             if k <= 0:
                 continue
             base = base_rates.get((a.employee_id, req.domain), Decimal("0"))
-            split_rate = base / Decimal(str(round(sqrt(k), 6)))
+            split_rate = base / Decimal(k)
             contributions.append(split_rate)
 
         contributions.sort(reverse=True)

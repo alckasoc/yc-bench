@@ -277,8 +277,23 @@ def run_benchmark(args):
         # Write live transcript alongside the DB so the streamlit dashboard can read it
         _slug = args.model.replace("/", "_")
         transcript_path = Path("db") / f"{args.config_name}_{args.seed}_{_slug}.transcript.jsonl"
-        if transcript_path.exists():
+        session_messages_path = Path("db") / f"{args.config_name}_{args.seed}_{_slug}.session.json"
+        _is_resume = transcript_path.exists() and session_messages_path.exists()
+        if not _is_resume and transcript_path.exists():
             transcript_path.unlink()
+
+        # Restore session messages on resume
+        if _is_resume:
+            n_restored = runtime.restore_session_messages(session_id, session_messages_path)
+            if n_restored > 0:
+                # Restore run_state turn count from transcript
+                try:
+                    prior_lines = transcript_path.read_text().strip().split("\n")
+                    prior_turns = len([l for l in prior_lines if l.strip()])
+                    run_state.turn_count = prior_turns
+                    logger.info("Resumed: %d prior turns, %d session messages.", prior_turns, n_restored)
+                except Exception:
+                    pass
 
         def _write_live_transcript(snapshot, rs, commands):
             """Append one JSONL line per turn for the streamlit dashboard."""
@@ -296,6 +311,8 @@ def run_benchmark(args):
             }, separators=(",", ":"))
             with open(transcript_path, "a") as f:
                 f.write(line + "\n")
+            # Save session messages after every turn for crash recovery
+            runtime.save_session_messages(session_id, session_messages_path)
 
         if use_live:
             from .dashboard import BenchmarkDashboard
