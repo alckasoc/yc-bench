@@ -366,6 +366,16 @@ def run_bot(config_name: str, seed: int, bot_slug: str, strategy_fn: StrategyFn)
                 task.company_id = company_id
                 task.accepted_at = sim_state.sim_time
                 task.deadline = _compute_deadline(sim_state.sim_time, max_domain_qty, world_cfg)
+                task.advertised_reward_cents = task.reward_funds_cents
+
+                # Scope creep: RAT clients inflate required_qty after accept
+                if is_rat:
+                    intensity = abs(client_row.loyalty)
+                    inflation = world_cfg.scope_creep_max * intensity
+                    inflation = max(3.0, inflation)
+                    for r in reqs:
+                        inflated = float(r.required_qty) * (1 + inflation)
+                        r.required_qty = int(min(25000, max(200, inflated)))
 
                 # Generate replacement
                 counter = sim_state.replenish_counter

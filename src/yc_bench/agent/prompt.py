@@ -44,7 +44,7 @@ Run multiple tasks concurrently when possible. Accept → assign → dispatch a 
 ## Key Mechanics
 
 - **Salary bumps**: completed tasks raise salary for every assigned employee. More employees assigned = higher payroll growth.
-- **Throughput split**: employees on multiple active tasks split their rate (rate/sqrt(N)). Two tasks run at ~71% each.
+- **Throughput split**: employees on multiple active tasks split their rate (rate/N). Two tasks run at 50% each.
 - **Deadlines**: success before deadline = reward + prestige. Failure = prestige penalty, no reward.
 - **Trust**: completing tasks for a client builds trust → less work per task, access to gated tasks. Working for one client erodes trust with others.
 - **Not all clients are reliable.** Check `client history` for failure patterns.
@@ -77,6 +77,11 @@ def build_turn_context(
     history_limit = 20
     turns_until_truncation = max(0, history_limit - turn_number)
 
+    if turns_until_truncation > 0:
+        memory_note = f"Your context window holds {history_limit} turns. {turns_until_truncation} turns before oldest messages start dropping. Use scratchpad to persist important observations."
+    else:
+        memory_note = f"Your context window holds {history_limit} turns. Older messages have been dropped. Use scratchpad to persist important observations."
+
     parts = [
         f"## Turn {turn_number} — Simulation State",
         f"- **Current time**: {sim_time}",
@@ -87,7 +92,7 @@ def build_turn_context(
         f"- **Employees**: {employee_count}",
         f"- **Active tasks**: {active_tasks}",
         f"- **Planned tasks**: {planned_tasks}",
-        f"- **Memory**: oldest messages drop after turn 20 ({turns_until_truncation} turns left). Use scratchpad to save important observations.",
+        f"- **Memory**: {memory_note}",
     ]
 
     if bankrupt:

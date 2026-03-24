@@ -146,6 +146,32 @@ class LiteLLMRuntime(AgentRuntime):
     def clear_session(self, session_id):
         self._sessions.pop(session_id, None)
 
+    def save_session_messages(self, session_id: str, path) -> None:
+        """Persist current session messages to a JSON file for resume."""
+        session = self._sessions.get(session_id)
+        if session is None:
+            return
+        import json as _json
+        from pathlib import Path
+        Path(path).write_text(_json.dumps(session.messages, separators=(",", ":")))
+
+    def restore_session_messages(self, session_id: str, path) -> int:
+        """Load saved messages into a session. Returns number of messages loaded."""
+        import json as _json
+        from pathlib import Path
+        p = Path(path)
+        if not p.exists():
+            return 0
+        try:
+            messages = _json.loads(p.read_text())
+            session = self._get_or_create_session(session_id)
+            session.messages = messages
+            logger.info("Restored %d messages into session %s.", len(messages), session_id)
+            return len(messages)
+        except Exception as exc:
+            logger.warning("Could not restore session from %s: %s", path, exc)
+            return 0
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
